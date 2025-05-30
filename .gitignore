@@ -4,5 +4,4 @@
 /data
 /.venv
 *.zip
-__init__.py
 .vscode/

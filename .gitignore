@@ -1,0 +1,7 @@
+*.pyc
+*.pyc
+/apps/__pycache__
+/data
+/.venv
+*.zip
+__init__.py

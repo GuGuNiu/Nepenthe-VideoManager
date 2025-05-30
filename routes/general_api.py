@@ -39,6 +39,7 @@ class VideoBase(BaseModel):
     duration: Optional[int] = None; width: Optional[int] = None
     height: Optional[int] = None; thumbnail_path: Optional[str] = None
     added_date: Optional[datetime] = None
+    rating: Optional[float] = Field(None, ge=0, le=5) 
     model_config = ConfigDict(from_attributes=True)
 
 class VideoResponseWithDetails(VideoBase):
@@ -51,6 +52,8 @@ class VideoUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     tags: Optional[List[str]] = Field(None)
     persons: Optional[List[str]] = Field(None)
+    rating: Optional[float] = Field(None, ge=0, le=5) 
+
 
 @router.get("/")
 async def read_api_root(): return {"message": "欢迎使用忘忧露视频管理 API！ (API 根路径)"}
@@ -155,6 +158,7 @@ async def increment_view_count(video_id: int, db: Session = Depends(get_db)):
 async def get_videos_with_search_sort(
     skip: int = 0, limit: int = 25, search_term: Optional[str] = None,
     tags: Optional[str] = None, persons_search: Optional[str] = None,
+    min_rating: Optional[float] = None, 
     sort_by: Optional[str] = "id", sort_order: Optional[str] = "desc",
     db: Session = Depends(get_db)
 ):
@@ -162,15 +166,26 @@ async def get_videos_with_search_sort(
         base_query = db.query(models.Video)
         count_base_query = db.query(func.count(models.Video.id))
         query_filters = []
-        if search_term: query_filters.append(models.Video.name.ilike(f"%{search_term}%"))
+        if search_term:
+            # 同时搜索文件名和标签名
+            search_filter = []
+            search_filter.append(models.Video.name.ilike(f"%{search_term}%"))
+            # 如果 search_term 也用于搜索标签，可以取消下面注释
+            # search_filter.append(models.Video.tags.any(models.Tag.name.ilike(f"%{search_term}%")))
+            query_filters.append(func.or_(*search_filter))
+
         if tags:
             tag_names_list = [t.strip() for t in tags.split(',') if t.strip()]
             if tag_names_list:
                 for tag_name in tag_names_list: query_filters.append(models.Video.tags.any(models.Tag.name == tag_name))
+        
         if persons_search:
             person_names_list = [p.strip() for p in persons_search.split(',') if p.strip()]
             if person_names_list:
                 for person_name in person_names_list: query_filters.append(models.Video.persons.any(models.Person.name == person_name))
+        
+        if min_rating is not None: # <--- 新增：处理最小评分筛选
+            query_filters.append(models.Video.rating >= min_rating)
         
         if query_filters:
             for f_filter in query_filters:
@@ -178,7 +193,11 @@ async def get_videos_with_search_sort(
                 count_base_query = count_base_query.filter(f_filter)
 
         total_count = count_base_query.scalar()
-        sort_column_map = { "id": models.Video.id, "name": models.Video.name, "duration": models.Video.duration, "view_count": models.Video.view_count, "added_date": models.Video.added_date, }
+        sort_column_map = { 
+            "id": models.Video.id, "name": models.Video.name, 
+            "duration": models.Video.duration, "view_count": models.Video.view_count, 
+            "added_date": models.Video.added_date, "rating": models.Video.rating 
+        }
         sort_column = sort_column_map.get(sort_by.lower(), models.Video.id)
         ordered_query = base_query.order_by(sort_column.asc() if sort_order.lower() == "asc" else sort_column.desc())
         videos_orm = ordered_query.options(selectinload(models.Video.tags), selectinload(models.Video.persons)).offset(skip).limit(limit).all()
@@ -186,7 +205,7 @@ async def get_videos_with_search_sort(
         return {"videos": videos_data, "total_count": total_count}
     except Exception as e:
         traceback.print_exc(); raise HTTPException(status_code=500, detail="获取视频列表失败")
-
+    
 @router.get("/videos/{video_id}", response_model=VideoResponseWithDetails)
 async def get_video_details(video_id: int, db: Session = Depends(get_db)):
     video_orm_obj = db.query(models.Video).options(selectinload(models.Video.tags), selectinload(models.Video.persons)).filter(models.Video.id == video_id).first()
@@ -198,6 +217,7 @@ async def update_video_details(video_id: int, video_update_data: VideoUpdate, db
     db_video = db.query(models.Video).options(selectinload(models.Video.tags), selectinload(models.Video.persons)).filter(models.Video.id == video_id).first()
     if not db_video: raise HTTPException(status_code=404, detail="视频未找到")
     if video_update_data.name is not None: db_video.name = video_update_data.name
+    if video_update_data.rating is not None: db_video.rating = video_update_data.rating 
     if video_update_data.tags is not None:
         updated_video_tags = []
         if video_update_data.tags: 

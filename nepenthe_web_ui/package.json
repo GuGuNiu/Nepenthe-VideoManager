@@ -9,9 +9,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev_direct": "electron electron/main.js",
-    "vite:serve": "vite --port 5174", 
-    "electron:run": "npx electron . --serve --port 5174", 
-    "electron:serve": "start-server-and-test vite:serve http-get://localhost:5174 electron:run" ,
+    "vite:serve": "vite --port 5174",
+    "electron:run": "npx electron . --serve --port 5174",
+    "electron:serve": "start-server-and-test vite:serve http-get://localhost:5174 electron:run",
     "electron:build": "vite build && electron-builder"
   },
   "dependencies": {
@@ -34,11 +34,12 @@
     "asar": true,
     "directories": {
       "output": "dist_electron",
-      "buildResources": "build_resources"
+      "buildResources": "build_resources" 
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "public/**/*", 
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
       "!**/node_modules/*.d.ts",
@@ -51,15 +52,15 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/vite.svg"
+      "icon": "public/fac.ico"
     },
     "mac": {
       "target": "dmg",
-      "icon": "public/vite.svg"
+      "icon": "public/fac.ico" 
     },
     "linux": {
       "target": "AppImage",
-      "icon": "public/vite.svg"
+      "icon": "public/fac.ico" 
     },
     "nsis": {
       "oneClick": false,

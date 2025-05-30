@@ -19,6 +19,7 @@ class Video(Base):
     path = Column(String, unique=True, index=True)
     folder = Column(String, index=True)
     added_date = Column(DateTime(timezone=True), server_default=func.now())
+    updated_date = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     duration = Column(Integer, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)

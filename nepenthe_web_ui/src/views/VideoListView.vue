@@ -2,7 +2,7 @@
   <div class="bili-videolist-page">
     <div class="sticky-controls-wrapper">
       <div class="sticky-controls-content">
-        <div class="bili-channel-section">
+        <div class="bili-channel-section bili-tags-section">
           <div class="bili-channel-header">
             <div class="left-channel-actions">
               <div class="channel-tags-wrapper" v-if="allAvailableTags.length > 0">
@@ -25,7 +25,10 @@
             </div>
           </div>
         </div>
-        <div class="bili-list-controls-container">
+
+        <hr class="section-separator" /> 
+
+        <div class="bili-list-controls-container bili-sort-section">
           <div class="sort-by-field-group">
             <el-button
               v-for="option in sortByOptions" :key="option.value"
@@ -149,8 +152,13 @@ const videoPlayerRefs = reactive({});
 let previewTimeoutId = null;
 const allAvailableTags = ref([]);
 const isLoadingTags = ref(false);
-const sortByOptions = ref([ { label: '默认推荐', value: 'id' }, { label: '视频名称', value: 'name' }, { label: '视频时长', value: 'duration' }, { label: '播放数量', value: 'view_count' }, { label: '添加时间', value: 'added_date' }, { label: '精选评级', value: 'rating' } ]);
-
+const sortByOptions = ref([ 
+  { label: '默认推荐', value: 'id' }, 
+  { label: '视频名称', value: 'name' }, 
+  { label: '视频时长', value: 'duration' }, 
+  { label: '播放数量', value: 'view_count' },
+  { label: '最近更新', value: 'updated_date' }
+]);
 watch(() => route.query, (newQuery, oldQuery) => {
     searchParams.searchTerm = newQuery.search_term || '';
     searchParams.tags = newQuery.tags ? String(newQuery.tags).split(',').map(t => t.trim()).filter(t => t) : [];
@@ -359,4 +367,5 @@ onBeforeUnmount(() => { if (previewTimeoutId) clearTimeout(previewTimeoutId); Ob
 .bili-pagination-container :deep(.el-pagination.is-background .el-pager li:not(.is-disabled):hover) { color: var(--el-color-primary) !important; }
 .delete-item { color: var(--el-color-danger); }
 .delete-item:hover { background-color: var(--el-color-danger-light-9); color: var(--el-color-danger); }
+.section-separator { border: none; border-top: 1px solid #e9e9eb; margin: 8px 20px; }
 </style>

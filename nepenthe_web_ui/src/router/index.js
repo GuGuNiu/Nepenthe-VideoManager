@@ -14,13 +14,13 @@ const router = createRouter({
 });
 
 router.beforeEach((to, from, next) => {
-  console.log(`[路由导航] 从: ${String(from.name)} (${from.fullPath}) 到: ${String(to.name)} (${to.fullPath})`);
+  //console.log(`[路由导航] 从: ${String(from.name)} (${from.fullPath}) 到: ${String(to.name)} (${to.fullPath})`);
   if (to.matched.some(record => record.meta.disabled)) {
     console.warn(`[路由导航] 到 ${String(to.name)} 的导航被 meta.disabled 阻止。`);
     if (from.name) { // 避免在初始加载时无限循环或导航到 undefined
       next(false); // 阻止导航
     } else {
-      next('/'); // 如果没有来源（可能是直接访问），重定向到首页
+      next('/'); // 如果没有来源重定向到首页
     }
     return;
   }

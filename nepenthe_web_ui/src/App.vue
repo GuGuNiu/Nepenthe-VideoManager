@@ -116,7 +116,7 @@ const handleClearSearch = () => {
 const hideSearchHistoryWithDelay = () => {
   setTimeout(() => {
     showSearchHistory.value = false;
-  }, 150); // 短暂延迟以允许点击历史记录项
+  }, 150);
 };
 
 onMounted(() => {
@@ -135,24 +135,57 @@ body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, Bl
 #app { height: 100%;}
 a { text-decoration: none; color: inherit; }
 ul, li { list-style: none; margin: 0; padding: 0; }
+
 .bili-app-container { display: flex; flex-direction: column; min-height: 100vh; }
 .bili-header { position: sticky; top: 0; z-index: 1000; background-color: #fff; }
-.bili-header-content { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; border-bottom: 1px solid #e3e5e7; }
-.bili-header-left { display: flex; align-items: center; }
+.bili-header-content {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid #e3e5e7;
+}
+
+.bili-header-left {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0; 
+}
 .bili-logo-link { display: flex; align-items: center; margin-right: 24px; }
 .bili-logo-img { height: 32px; }
 .bili-main-nav { display: flex; align-items: center; gap: 20px; margin-left: 20px;}
 .bili-nav-item { padding: 0 8px; font-size: 15px; color: #61666d; transition: color 0.2s; line-height: 56px; display: inline-block; font-weight: 500; }
 .bili-nav-item.is-active-nav, .bili-nav-item:hover:not(.disabled-nav) { color: #00a1d6; }
 .disabled-nav { color: #aaa !important; cursor: not-allowed; }
-.bili-header-center { position: relative; flex-grow: 1; display: flex; justify-content: center; max-width: 550px; margin: 0 20px; }
-.bili-search-input .el-input__wrapper { border-radius: 8px; background-color: #f1f2f3; box-shadow: none; }
+
+.bili-header-center {
+  position: relative; 
+  flex-grow: 1; 
+  display: flex;
+  justify-content: center; 
+  align-items: center; 
+}
+
+.bili-search-input {
+  max-width: 550px; 
+  width: 100%; 
+}
+
+.bili-search-input .el-input__wrapper { background-color: #f1f2f3; box-shadow: none; }
 .bili-search-input .el-input__wrapper:hover { background-color: #e7e8ea; }
 .bili-search-input .el-input-group__append .el-button { background-color: #f1f2f3; border-left: none; border-radius: 0 8px 8px 0; color: #61666d; }
 .bili-search-input .el-input-group__append .el-button:hover { background-color: #e7e8ea; color: #00a1d6;}
-.search-history-dropdown { position: absolute; top: calc(100% + 2px); left: 0; width: 100%; background-color: white; border: 1px solid #e3e5e7; border-top: none; border-radius: 0 0 6px 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 8px; z-index: 900; display: flex; flex-direction: column; gap: 6px; }
+.search-history-dropdown { position: absolute; top: calc(100% + 2px); width: 100%; max-width: 550px; background-color: white; border: 1px solid #e3e5e7; border-top: none; border-radius: 0 0 6px 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 8px; z-index: 900; display: flex; flex-direction: column; gap: 6px; }
 .history-tag { cursor: pointer; align-self: flex-start; }
-.bili-header-right { display: flex; align-items: center; min-width: 1px; }
+
+.bili-header-right {
+  display: flex;
+  align-items: center;
+  min-width: 1px; 
+  flex-shrink: 0; 
+  width:350px;
+}
+
 .bili-main-wrapper { flex-grow: 1; display: flex; justify-content: center; padding-top: 16px; }
 .bili-main-content { width: 100%; max-width: 1320px; }
 :root { --el-color-primary: #00a1d6; --el-border-radius-base: 6px; }

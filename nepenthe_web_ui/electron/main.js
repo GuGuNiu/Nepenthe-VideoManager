@@ -1,5 +1,4 @@
-// electron/main.js
-import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, session } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -18,22 +17,21 @@ if (portArgIndex !== -1 && args[portArgIndex + 1]) {
     servePort = parsedPort;
   }
 }
-// 中文日志示例
-console.log(`[主进程] Electron启动参数: ${args.join(' ')}, 是否开发模式: ${isServeMode}, 服务端口: ${servePort}`);
+console.log(`[MainProcess] Electron launch arguments: ${args.join(' ')}, isDevMode: ${isServeMode}, servePort: ${servePort}`);
 
 let mainWindow;
 
 function createWindow() {
-  console.log('[主进程] createWindow函数开始执行。');
+  console.log('[MainProcess] createWindow function invoked.');
   const preloadScriptPath = path.join(__dirname, 'preload.js');
-  console.log('[主进程] Preload脚本预期路径:', preloadScriptPath);
+  console.log('[MainProcess] Expected preload script path:', preloadScriptPath);
 
   if (!fs.existsSync(preloadScriptPath)) {
-    console.error('[主进程] 致命错误: Preload脚本未找到:', preloadScriptPath);
+    console.error('[MainProcess] FATAL ERROR: Preload script not found at:', preloadScriptPath);
     app.quit();
     return;
   }
-  console.log('[主进程] Preload脚本文件存在。');
+  console.log('[MainProcess] Preload script file found.');
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -45,23 +43,32 @@ function createWindow() {
     },
     icon: path.join(__dirname, '../public/fac.ico') 
   });
-  console.log('[主进程] BrowserWindow实例已创建。');
+  console.log('[MainProcess] BrowserWindow instance created.');
 
   Menu.setApplicationMenu(null);
 
   if (isServeMode) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': ["default-src 'self' http://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://localhost:*; object-src 'none'"]
+        }
+      });
+    });
+
     const devUrl = `http://localhost:${servePort}`;
-    console.log(`[主进程] 开发模式，加载URL: ${devUrl}`);
+    console.log(`[MainProcess] Development mode, loading URL: ${devUrl}`);
     mainWindow.loadURL(devUrl)
       .then(() => {
-        console.log(`[主进程] 成功加载URL: ${devUrl}`);
+        console.log(`[MainProcess] Successfully loaded URL: ${devUrl}`);
       })
       .catch(err => {
-        console.error(`[主进程] 加载开发URL ${devUrl} 失败:`, err);
-        console.error(`[主进程] 请确保Vite开发服务器正在端口 ${servePort} 上运行。`);
+        console.error(`[MainProcess] Failed to load dev URL ${devUrl}:`, err);
+        console.error(`[MainProcess] Please ensure Vite dev server is running on port ${servePort}.`);
       });
     mainWindow.webContents.openDevTools();
-    console.log('[主进程] 开发模式下已打开开发者工具。');
+    console.log('[MainProcess] Developer tools opened in development mode.');
   } else {
     const indexHtmlPath = path.join(__dirname, '../dist/index.html');
     const indexPath = url.format({
@@ -69,54 +76,54 @@ function createWindow() {
       protocol: 'file:',
       slashes: true,
     });
-    console.log(`[主进程] 生产模式，加载文件: ${indexPath}`);
+    console.log(`[MainProcess] Production mode, loading file: ${indexPath}`);
      if (!fs.existsSync(indexHtmlPath)) {
-        console.error('[主进程] 错误: 生产模式下 dist/index.html 未找到于路径:', indexHtmlPath);
+        console.error('[MainProcess] ERROR: dist/index.html not found in production mode at path:', indexHtmlPath);
     }
     mainWindow.loadURL(indexPath)
-      .then(() => console.log(`[主进程] 成功加载文件: ${indexPath}`))
-      .catch(err => console.error(`[主进程] 加载生产文件 ${indexPath} 失败:`, err));
+      .then(() => console.log(`[MainProcess] Successfully loaded file: ${indexPath}`))
+      .catch(err => console.error(`[MainProcess] Failed to load production file ${indexPath}:`, err));
   }
 
   mainWindow.on('closed', () => {
-    console.log('[主进程] MainWindow已关闭。');
+    console.log('[MainProcess] MainWindow closed.');
     mainWindow = null;
   });
 }
 
 app.whenReady().then(() => {
-    console.log('[主进程] App已就绪，调用createWindow。');
+    console.log('[MainProcess] App is ready, calling createWindow.');
     createWindow();
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
-        console.log('[主进程] App已激活且无窗口打开，调用createWindow。');
+        console.log('[MainProcess] App activated with no open windows, calling createWindow.');
         createWindow();
         }
     });
 }).catch(err => {
-  console.error('[主进程] app.whenReady期间发生错误:', err);
+  console.error('[MainProcess] Error during app.whenReady promise:', err);
 });
 
 app.on('window-all-closed', () => {
-  console.log('[主进程] 所有窗口已关闭。');
+  console.log('[MainProcess] All windows closed.');
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('quit', () => {
-  console.log('[主进程] App退出。');
+  console.log('[MainProcess] App quitting.');
 });
 
 ipcMain.on('play-video-locally', (event, videoPath) => {
   if (videoPath && typeof videoPath === 'string') {
-    console.log(`[主进程] IPC 'play-video-locally': 收到播放请求: ${videoPath}`);
+    console.log(`[MainProcess] IPC 'play-video-locally': Received request to play: ${videoPath}`);
     shell.openPath(videoPath)
-      .then(() => console.log(`[主进程] IPC 'play-video-locally': 成功尝试打开: ${videoPath}`))
+      .then(() => console.log(`[MainProcess] IPC 'play-video-locally': Successfully attempted to open: ${videoPath}`))
       .catch(err => {
-        console.error(`[主进程] IPC 'play-video-locally': 使用shell打开路径 "${videoPath}" 失败:`, err);
+        console.error(`[MainProcess] IPC 'play-video-locally': Failed to open path "${videoPath}" using shell:`, err);
       });
   } else {
-    console.error('[主进程] IPC \'play-video-locally\': 收到无效的videoPath:', videoPath);
+    console.error('[MainProcess] IPC \'play-video-locally\': Received invalid videoPath:', videoPath);
   }
 });

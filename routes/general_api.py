@@ -196,7 +196,8 @@ async def get_videos_with_search_sort(
         sort_column_map = { 
             "id": models.Video.id, "name": models.Video.name, 
             "duration": models.Video.duration, "view_count": models.Video.view_count, 
-            "added_date": models.Video.added_date, "rating": models.Video.rating 
+            "added_date": models.Video.added_date, "rating": models.Video.rating,
+            "updated_date": models.Video.updated_date
         }
         sort_column = sort_column_map.get(sort_by.lower(), models.Video.id)
         ordered_query = base_query.order_by(sort_column.asc() if sort_order.lower() == "asc" else sort_column.desc())

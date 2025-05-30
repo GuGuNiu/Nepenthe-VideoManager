@@ -116,3 +116,10 @@ FFmpeg/FFprobe 路径: 如果 FFmpeg/FFprobe 没有在系统 PATH 中，需要�
 允许自定义本地播放器路径
 
 
+<div align="left"> 
+  
+  [![访问量](https://profile-counter.glitch.me/Nepenthe-VideoManager/count.svg)](https://github.com/GuGuNiu/Nepenthe-VideoManager)
+  
+</div>
+
+

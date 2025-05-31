@@ -218,11 +218,11 @@ const startPreview = (videoId) => {
       if (player) {
         console.log(`尝试预览播放视频ID: ${videoId}, 播放器元素:`, player);
         player.currentTime = 0;
-        player.playbackRate = 5.0; // 在播放前设置倍速
+        player.playbackRate = 5.0; 
         player.play()
           .then(() => {
             console.log(`视频ID: ${videoId} 预览已开始播放。`);
-            // 再次确保倍速，有时 play() 后浏览器可能会重置它
+            
             if (player.playbackRate !== 5.0) {
                 player.playbackRate = 5.0;
             }
@@ -244,6 +244,83 @@ const stopPreview = (videoId) => {
     if (player) player.pause();
     previewingVideoId.value = null;
   }
+};
+const stopPreview = (videoIdToStop) => {
+  console.log(`[前端 stopPreview] 请求停止预览视频ID: ${videoIdToStop}, 当前正在预览: ${previewingVideoId.value}`);
+  if (previewTimeoutId) {
+    clearTimeout(previewTimeoutId);
+    previewTimeoutId = null;
+  }
+  
+  if (previewingVideoId.value === videoIdToStop) {
+    const player = videoPlayerRefs[videoIdToStop];
+    if (player) {
+      console.log(`[前端 stopPreview] 找到播放器 for ${videoIdToStop}, 当前状态 paused: ${player.paused}, src: ${player.currentSrc}`);
+      player.pause(); 
+      
+      player.src = ""; 
+      player.removeAttribute('src'); 
+      player.load(); 
+      console.log(`[前端 stopPreview] 视频ID: ${videoIdToStop} 预览已停止并清理。`);
+      
+    } else {
+      console.warn(`[前端 stopPreview] 未找到播放器 for ${videoIdToStop} 来停止。`);
+    }
+    previewingVideoId.value = null;
+  }
+};
+
+const startPreview = (videoId) => {
+  
+  
+  if (previewingVideoId.value && previewingVideoId.value !== videoId) {
+    stopPreview(previewingVideoId.value);
+  }
+  
+  if (previewTimeoutId) clearTimeout(previewTimeoutId);
+
+  previewTimeoutId = setTimeout(async () => {
+    if (previewingVideoId.value === videoId && videoPlayerRefs[videoId] && !videoPlayerRefs[videoId].paused) {
+      return; 
+    }
+
+    previewingVideoId.value = videoId;
+    await nextTick(); 
+
+    const player = videoPlayerRefs[videoId];
+    if (player) {
+      const streamUrl = getVideoStreamUrl(videoId);
+      console.log(`[前端 startPreview] 尝试为视频ID ${videoId} 设置 src: ${streamUrl}`);
+      player.src = streamUrl; 
+      
+      const onCanPlay = () => {
+         console.log(`[前端 startPreview] 视频ID ${videoId} canplay 事件触发。`);
+         player.currentTime = 0;
+         player.playbackRate = 5.0;
+         player.play()
+           .then(() => { console.log(`视频ID: ${videoId} 预览已开始播放。`);})
+           .catch(e => { 
+               console.error(`视频ID: ${videoId} 预览播放Promise失败:`, e);
+               if (previewingVideoId.value === videoId) stopPreview(videoId); 
+           });
+         player.removeEventListener('canplay', onCanPlay); 
+         player.removeEventListener('error', onError);
+      };
+      const onError = (e) => {
+         console.error(`[前端 startPreview] 视频ID ${videoId} 加载或播放时发生错误事件:`, e);
+         if (previewingVideoId.value === videoId) stopPreview(videoId);
+         player.removeEventListener('canplay', onCanPlay);
+         player.removeEventListener('error', onError);
+      };
+      player.addEventListener('canplay', onCanPlay);
+      player.addEventListener('error', onError);
+      player.load(); 
+
+    } else {
+      console.warn(`预览播放器未找到 for videoId: ${videoId}`);
+      if (previewingVideoId.value === videoId) stopPreview(videoId);
+    }
+  }, 300); 
 };
 const setPlaybackRate = (event, rate) => { if (event.target) event.target.playbackRate = rate; };
 const fetchVideos = async (page = currentPage.value, size = pageSize.value) => {

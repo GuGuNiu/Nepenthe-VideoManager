@@ -167,11 +167,8 @@ async def get_videos_with_search_sort(
         count_base_query = db.query(func.count(models.Video.id))
         query_filters = []
         if search_term:
-            # 同时搜索文件名和标签名
             search_filter = []
             search_filter.append(models.Video.name.ilike(f"%{search_term}%"))
-            # 如果 search_term 也用于搜索标签，可以取消下面注释
-            # search_filter.append(models.Video.tags.any(models.Tag.name.ilike(f"%{search_term}%")))
             query_filters.append(func.or_(*search_filter))
 
         if tags:
@@ -184,7 +181,7 @@ async def get_videos_with_search_sort(
             if person_names_list:
                 for person_name in person_names_list: query_filters.append(models.Video.persons.any(models.Person.name == person_name))
         
-        if min_rating is not None: # <--- 新增：处理最小评分筛选
+        if min_rating is not None: 
             query_filters.append(models.Video.rating >= min_rating)
         
         if query_filters:
@@ -275,57 +272,121 @@ async def scan_library_api(background_tasks: BackgroundTasks):
 async def stream_video(video_id: int, request: Request, db: Session = Depends(get_db)):
     video = db.query(models.Video).filter(models.Video.id == video_id).first()
     if not video or not video.path or not os.path.exists(video.path) or not os.path.isfile(video.path):
+        print(f"[API Stream] 视频文件未找到或路径无效 for video_id: {video_id}, path: {video.path if video else 'N/A'}")
         raise HTTPException(status_code=404, detail="视频文件未找到或路径无效")
+
     file_path = video.path
-    try: file_size = os.stat(file_path).st_size
-    except Exception as e: raise HTTPException(status_code=500, detail="无法获取文件信息")
+    try:
+        file_size = os.stat(file_path).st_size
+    except Exception as e:
+        print(f"[API Stream] 无法获取文件信息 for {file_path}: {e}")
+        raise HTTPException(status_code=500, detail="无法获取文件信息")
+
     range_header = request.headers.get("range")
+    
+    
     content_type, _ = mimetypes.guess_type(file_path)
-    content_type = content_type or "application/octet-stream"
+    
     file_ext = os.path.splitext(file_path)[1].lower()
-    if file_ext == ".mp4": content_type = "video/mp4"
-    elif file_ext == ".webm": content_type = "video/webm"
-    elif file_ext == ".mkv": content_type = "video/x-matroska"
-    headers = {"Content-Type": content_type, "Accept-Ranges": "bytes", "Connection": "keep-alive"}
+    if file_ext == ".mp4":
+        content_type = "video/mp4"
+    elif file_ext == ".webm":
+        content_type = "video/webm"
+    elif file_ext == ".mkv":
+        
+        content_type = "video/x-matroska" 
+    elif file_ext == ".avi":
+        content_type = "video/x-msvideo"
+    elif file_ext == ".mov":
+        content_type = "video/quicktime"
+    elif file_ext == ".flv":
+        content_type = "video/x-flv"
+    
+    if content_type is None:
+        content_type = "application/octet-stream" 
+
+    headers = {
+        "Content-Type": content_type,
+        "Accept-Ranges": "bytes",
+        "Connection": "keep-alive",
+        
+    }
+
     if range_header:
         try:
             range_value = range_header.strip().lower().replace("bytes=", "")
             parts = range_value.split("-")
             start_byte = int(parts[0]) if parts[0] else 0
-            end_byte_requested = file_size - 1
-            if len(parts) > 1 and parts[1]: end_byte_requested = int(parts[1])
+            
+            end_byte_requested = file_size - 1 
+            if len(parts) > 1 and parts[1]: 
+                end_byte_requested = int(parts[1])
+            
             end_byte = min(end_byte_requested, file_size - 1)
+
             if start_byte < 0 or start_byte >= file_size or start_byte > end_byte:
+                print(f"[API Stream] 无效的 Range 请求 for {file_path}: {range_header}, file_size: {file_size}")
                 headers["Content-Range"] = f"bytes */{file_size}"
-                return Response(content=None, status_code=416, headers=headers)
+                return Response(content=None, status_code=416, headers=headers) 
+
             length_to_send = end_byte - start_byte + 1
             headers["Content-Length"] = str(length_to_send)
             headers["Content-Range"] = f"bytes {start_byte}-{end_byte}/{file_size}"
-            status_code = 206
-            def ranged_iterfile():
+            status_code = 206 
+            
+            print(f"[API Stream] Range request for {file_path}: bytes {start_byte}-{end_byte}/{file_size}")
+
+            async def ranged_iterfile():
                 try:
-                    with open(file_path, "rb") as f_stream:
-                        f_stream.seek(start_byte)
-                        bytes_sent = 0
-                        while bytes_sent < length_to_send:
-                            chunk_size = min(65536, length_to_send - bytes_sent)
-                            data = f_stream.read(chunk_size)
-                            if not data: break
+                    async with aiofiles.open(file_path, "rb") as f_stream:
+                        await f_stream.seek(start_byte)
+                        bytes_yielded = 0
+                        while bytes_yielded < length_to_send:
+                            chunk_size = min(65536, length_to_send - bytes_yielded) 
+                            data = await f_stream.read(chunk_size)
+                            if not data:
+                                print(f"[API Stream] Ranged stream: 文件读取完毕但未达到预期长度 for {file_path}")
+                                break
                             yield data
-                            bytes_sent += len(data)
-                except Exception as e_iter: print(f"Stream iter error: {e_iter}")
+                            bytes_yielded += len(data)
+                            
+                except (socket.error, ConnectionResetError, BrokenPipeError, asyncio.CancelledError) as e_sock:
+                    print(f"[API Stream] Socket/Connection error during ranged streaming for {file_path} (client likely disconnected): {type(e_sock).__name__} - {e_sock}")
+                except Exception as e_iter:
+                    print(f"[API Stream] Unexpected error during ranged streaming for {file_path}: {type(e_iter).__name__} - {e_iter}")
+                    traceback.print_exc()
+                finally:
+                    print(f"[API Stream] Ranged stream for {file_path} finished or terminated. Yielded {bytes_yielded} bytes.")
+            
             return StreamingResponse(ranged_iterfile(), status_code=status_code, headers=headers, media_type=content_type)
-        except ValueError: raise HTTPException(status_code=400, detail="Invalid Range header")
-        except Exception as e_range_proc: traceback.print_exc(); raise HTTPException(status_code=500, detail="Error processing Range request")
+
+        except ValueError:
+            print(f"[API Stream] 无效的 Range header for {file_path}: {range_header}")
+            raise HTTPException(status_code=400, detail="Invalid Range header")
+        except Exception as e_range_proc:
+            print(f"[API Stream] Error processing Range request for {file_path}: {e_range_proc}")
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail="Error processing Range request")
     else:
+        
+        print(f"[API Stream] Full file request for {file_path}, size: {file_size}")
         headers["Content-Length"] = str(file_size)
-        status_code = 200
-        def full_iterfile():
+        status_code = 200 
+
+        async def full_iterfile():
             try:
-                with open(file_path, "rb") as f_stream_full:
+                async with aiofiles.open(file_path, "rb") as f_stream_full:
                     while True:
-                        chunk = f_stream_full.read(65536)
-                        if not chunk: break
+                        chunk = await f_stream_full.read(65536) 
+                        if not chunk:
+                            break
                         yield chunk
-            except Exception as e_iter_full: print(f"Full stream iter error: {e_iter_full}")
+            except (socket.error, ConnectionResetError, BrokenPipeError, asyncio.CancelledError) as e_sock_full:
+                print(f"[API Stream] Socket/Connection error during full streaming for {file_path} (client likely disconnected): {type(e_sock_full).__name__} - {e_sock_full}")
+            except Exception as e_iter_full:
+                print(f"[API Stream] Unexpected error during full streaming for {file_path}: {type(e_iter_full).__name__} - {e_iter_full}")
+                traceback.print_exc()
+            finally:
+                print(f"[API Stream] Full stream for {file_path} finished or terminated.")
+
         return StreamingResponse(full_iterfile(), status_code=status_code, headers=headers, media_type=content_type)

@@ -83,8 +83,8 @@
                      <el-icon><UserFilled /></el-icon> {{ person.name }}
                   </el-tag>
                 </div>
-                 <div class="bili-card-rating" v-if="video.rating > 0">
-                    <el-rate :model-value="video.rating" disabled size="small" :max="5" allow-half />
+                <div class="bili-card-rating" v-if="video.rating !== null && video.rating !== undefined && video.rating >= 0">
+                    <span>评分: {{ video.rating.toFixed(1) }} / 5</span>
                 </div>
                 <div class="bili-card-meta">
                   <span>播放: {{ video.view_count || 0 }}</span>
@@ -215,10 +215,28 @@ const startPreview = (videoId) => {
     previewingVideoId.value = videoId;
     nextTick(() => {
       const player = videoPlayerRefs[videoId];
-      if (player) { player.currentTime = 0; player.playbackRate = 5.0; player.play().catch(e => {}); }
+      if (player) {
+        console.log(`尝试预览播放视频ID: ${videoId}, 播放器元素:`, player);
+        player.currentTime = 0;
+        player.playbackRate = 5.0; // 在播放前设置倍速
+        player.play()
+          .then(() => {
+            console.log(`视频ID: ${videoId} 预览已开始播放。`);
+            // 再次确保倍速，有时 play() 后浏览器可能会重置它
+            if (player.playbackRate !== 5.0) {
+                player.playbackRate = 5.0;
+            }
+          })
+          .catch(e => {
+            console.error(`视频ID: ${videoId} 预览播放失败:`, e);
+          });
+      } else {
+        console.warn(`预览播放器未找到 for videoId: ${videoId}`);
+      }
     });
   }, 300);
 };
+
 const stopPreview = (videoId) => {
   if (previewTimeoutId) clearTimeout(previewTimeoutId);
   if (previewingVideoId.value === videoId) {
@@ -309,7 +327,9 @@ const handleDeleteVideo = async (videoToDelete) => {
 const handleCardCommand = (command) => { if (command.action === 'edit') { openEditModal(command.video); } else if (command.action === 'delete') { handleDeleteVideo(command.video); } };
 
 onMounted(() => { 
+    //console.log('[VideoListView onMounted] 组件已挂载，调用 fetchAllAvailableTags 和 triggerSearch。');
     fetchAllAvailableTags(); 
+    triggerSearch();
 });
 onBeforeUnmount(() => { if (previewTimeoutId) clearTimeout(previewTimeoutId); Object.keys(videoPlayerRefs).forEach(vidId => { const player = videoPlayerRefs[vidId]; if (player && typeof player.pause === 'function') player.pause(); }); });
 </script>

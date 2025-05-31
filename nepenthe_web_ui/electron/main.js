@@ -49,11 +49,12 @@ function createWindow() {
       "default-src 'self' http://localhost:" + servePort, 
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:" + servePort, 
       "style-src 'self' 'unsafe-inline'", 
-      "img-src 'self' data: http://localhost:" + servePort + " http://127.0.0.1:8000", 
+      "img-src 'self' data: http://localhost:" + servePort + " http://127.0.0.1:*", 
       "font-src 'self' data: http://localhost:" + servePort, 
-      "connect-src 'self' http://localhost:" + servePort + " http://127.0.0.1:8000", 
+      "connect-src 'self' http://localhost:" + servePort + " http://127.0.0.1:*", 
+      "media-src 'self' http://localhost:" + servePort + " http://127.0.0.1:*; ", 
       "object-src 'none'", 
-      "frame-src 'none'" 
+      "frame-src 'none'"  
     ];
     const cspString = cspDirectives.join('; '); 
 

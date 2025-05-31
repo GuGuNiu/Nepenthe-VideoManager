@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Response
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
@@ -158,32 +158,46 @@ async def increment_view_count(video_id: int, db: Session = Depends(get_db)):
 
 @router.get("/videos", response_model=dict)
 async def get_videos_with_search_sort(
-    skip: int = 0, limit: int = 25, search_term: Optional[str] = None,
-    tags: Optional[str] = None, persons_search: Optional[str] = None,
+    skip: int = 0, 
+    limit: int = 25, 
+    search_term: Optional[str] = None,
+    tags: Optional[str] = None, 
+    persons_search: Optional[str] = None,
     min_rating: Optional[float] = None, 
-    sort_by: Optional[str] = "id", sort_order: Optional[str] = "desc",
+    sort_by: Optional[str] = "id", 
+    sort_order: Optional[str] = "desc",
     db: Session = Depends(get_db)
 ):
     try:
         base_query = db.query(models.Video)
         count_base_query = db.query(func.count(models.Video.id))
+        
         query_filters = []
+
         if search_term:
-            search_filter = []
-            search_filter.append(models.Video.name.ilike(f"%{search_term}%"))
-            query_filters.append(func.or_(*search_filter))
+            search_conditions_for_term = []
+            search_conditions_for_term.append(models.Video.name.ilike(f"%{search_term}%"))
+            search_conditions_for_term.append(models.Video.tags.any(models.Tag.name.ilike(f"%{search_term}%")))
+            
+            if len(search_conditions_for_term) > 1:
+                combined_search_filter = or_(*search_conditions_for_term)
+                query_filters.append(combined_search_filter)
+            elif len(search_conditions_for_term) == 1:
+                query_filters.append(search_conditions_for_term[0])
 
         if tags:
             tag_names_list = [t.strip() for t in tags.split(',') if t.strip()]
             if tag_names_list:
-                for tag_name in tag_names_list: query_filters.append(models.Video.tags.any(models.Tag.name == tag_name))
+                for tag_name in tag_names_list: 
+                    query_filters.append(models.Video.tags.any(models.Tag.name == tag_name))
         
         if persons_search:
             person_names_list = [p.strip() for p in persons_search.split(',') if p.strip()]
             if person_names_list:
-                for person_name in person_names_list: query_filters.append(models.Video.persons.any(models.Person.name == person_name))
+                for person_name in person_names_list: 
+                    query_filters.append(models.Video.persons.any(models.Person.name == person_name))
         
-        if min_rating is not None: 
+        if min_rating is not None:
             query_filters.append(models.Video.rating >= min_rating)
         
         if query_filters:
@@ -192,19 +206,31 @@ async def get_videos_with_search_sort(
                 count_base_query = count_base_query.filter(f_filter)
 
         total_count = count_base_query.scalar()
+        
         sort_column_map = { 
-            "id": models.Video.id, "name": models.Video.name, 
-            "duration": models.Video.duration, "view_count": models.Video.view_count, 
-            "added_date": models.Video.added_date, "rating": models.Video.rating,
-            "updated_date": models.Video.updated_date
+            "id": models.Video.id, 
+            "name": models.Video.name, 
+            "duration": models.Video.duration, 
+            "view_count": models.Video.view_count, 
+            "added_date": models.Video.added_date, 
+            "rating": models.Video.rating,
+            "updated_date": models.Video.updated_date 
         }
         sort_column = sort_column_map.get(sort_by.lower(), models.Video.id)
+        
         ordered_query = base_query.order_by(sort_column.asc() if sort_order.lower() == "asc" else sort_column.desc())
-        videos_orm = ordered_query.options(selectinload(models.Video.tags), selectinload(models.Video.persons)).offset(skip).limit(limit).all()
+        
+        videos_orm = ordered_query.options(
+            selectinload(models.Video.tags), 
+            selectinload(models.Video.persons)
+        ).offset(skip).limit(limit).all()
+        
         videos_data = [_format_video_response(vo).model_dump(mode='json') for vo in videos_orm]
+        
         return {"videos": videos_data, "total_count": total_count}
     except Exception as e:
-        traceback.print_exc(); raise HTTPException(status_code=500, detail="获取视频列表失败")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取视频列表失败: {str(e)}")
     
 @router.get("/videos/{video_id}", response_model=VideoResponseWithDetails)
 async def get_video_details(video_id: int, db: Session = Depends(get_db)):

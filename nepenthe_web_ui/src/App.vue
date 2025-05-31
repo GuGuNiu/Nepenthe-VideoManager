@@ -169,7 +169,7 @@ ul, li { list-style: none; margin: 0; padding: 0; }
 
 .bili-search-input {
   max-width: 70%;
-  min-width: 550px; 
+  min-width: 400px; 
   width: 100%; 
 }
 

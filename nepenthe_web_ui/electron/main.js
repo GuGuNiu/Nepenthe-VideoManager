@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, session } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, session } from 'electron'; 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -24,14 +24,11 @@ let mainWindow;
 function createWindow() {
   console.log('[MainProcess] createWindow function invoked.');
   const preloadScriptPath = path.join(__dirname, 'preload.js');
-  console.log('[MainProcess] Expected preload script path:', preloadScriptPath);
-
   if (!fs.existsSync(preloadScriptPath)) {
     console.error('[MainProcess] FATAL ERROR: Preload script not found at:', preloadScriptPath);
     app.quit();
     return;
   }
-  console.log('[MainProcess] Preload script file found.');
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -46,15 +43,26 @@ function createWindow() {
   console.log('[MainProcess] BrowserWindow instance created.');
 
   Menu.setApplicationMenu(null);
-
+  
   if (isServeMode) {
+    const cspDirectives = [
+      "default-src 'self' http://localhost:" + servePort, 
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:" + servePort, 
+      "style-src 'self' 'unsafe-inline'", 
+      "img-src 'self' data: http://localhost:" + servePort + " http://127.0.0.1:8000", 
+      "font-src 'self' data: http://localhost:" + servePort, 
+      "connect-src 'self' http://localhost:" + servePort + " http://127.0.0.1:8000", 
+      "object-src 'none'", 
+      "frame-src 'none'" 
+    ];
+    const cspString = cspDirectives.join('; '); 
+
+    console.log("[MainProcess] Applying CSP:", cspString);
+
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          'Content-Security-Policy': ["default-src 'self' http://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://localhost:*; object-src 'none'"]
-        }
-      });
+      let responseHeaders = details.responseHeaders || {};
+      responseHeaders['Content-Security-Policy'] = [cspString]; 
+      callback({ responseHeaders });
     });
 
     const devUrl = `http://localhost:${servePort}`;
@@ -71,11 +79,7 @@ function createWindow() {
     console.log('[MainProcess] Developer tools opened in development mode.');
   } else {
     const indexHtmlPath = path.join(__dirname, '../dist/index.html');
-    const indexPath = url.format({
-      pathname: indexHtmlPath,
-      protocol: 'file:',
-      slashes: true,
-    });
+    const indexPath = url.format({ pathname: indexHtmlPath, protocol: 'file:', slashes: true, });
     console.log(`[MainProcess] Production mode, loading file: ${indexPath}`);
      if (!fs.existsSync(indexHtmlPath)) {
         console.error('[MainProcess] ERROR: dist/index.html not found in production mode at path:', indexHtmlPath);

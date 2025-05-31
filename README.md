@@ -13,10 +13,15 @@
 </p>
 
 ---
+<div align="center">
+  
+# **本项目是我个人研究学习程序,严禁用于任何商业用途**
+
+</div>
 
 ## 🌟 项目说明
 
-*   **所有视频数据和元信息均存储在本地**
+*   **所有视频数据和元信息均使用本地路径的文件夹**
 *   **管理**：
     *   📁 **视频库扫描**：自动扫描指定文件夹中的视频文件。
     *   🖼️ **缩略图生成**：为视频自动生成缩略图，方便快速预览。
@@ -74,6 +79,7 @@
     # python -m venv venv 
     # source venv/bin/activate  (Linux/macOS)
     # venv\Scripts\activate  (Windows)
+    # venv\Scripts\Activate.ps1 （Windows PS)
     pip install -r requirements.txt 
     python run_backend_server.py 
     ```

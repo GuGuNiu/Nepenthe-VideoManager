@@ -25,9 +25,7 @@
             </div>
           </div>
         </div>
-
         <hr class="section-separator" /> 
-
         <div class="bili-list-controls-container bili-sort-section">
           <div class="sort-by-field-group">
             <el-button
@@ -76,17 +74,17 @@
               <div class="bili-card-info">
                 <h3 class="bili-card-title" :title="video.name">{{ video.name }}</h3>
                 <div class="bili-card-tags-persons">
-                  <el-tag v-for="tag in video.tags" :key="tag.id" size="small" class="info-tag" @click.stop="addTagToSearch(tag.name)">{{ tag.name }}</el-tag>
                   <el-tag v-for="person in video.persons" :key="person.id" type="warning" size="small" class="info-tag person-tag" @click.stop="addPersonToSearch(person.name)">
                      <el-icon><UserFilled /></el-icon> {{ person.name }}
                   </el-tag>
+                  <el-tag v-for="tag in video.tags" :key="tag.id" size="small" class="info-tag" @click.stop="addTagToSearch(tag.name)">{{ tag.name }}</el-tag>
                 </div>
                 <div class="bili-card-rating" v-if="video.rating !== null && video.rating !== undefined && video.rating >= 0">
                     <span>评分: {{ video.rating.toFixed(1) }} / 5</span>
                 </div>
                 <div class="bili-card-meta">
-                  <span>播放: {{ video.view_count || 0 }}</span>
-                  <span>{{ formatRelativeDate(video.added_date) }}</span>
+                  <span class="meta-item view-count">播放: {{ video.view_count || 0 }}</span>
+                  <span class="meta-item added-date">{{ formatRelativeDate(video.added_date) }}</span>
                 </div>
                 <div class="bili-card-actions">
                     <el-dropdown @command="handleCardCommand" trigger="click" @click.stop>
@@ -145,11 +143,9 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000
 const searchParams = reactive({ searchTerm: '', tags: [], persons_search: '', min_rating: props.initialMinRating, sortBy: props.initialMinRating ? 'rating' : 'id', sortOrder: 'desc' });
 const editModalVisible = ref(false);
 const currentVideoToEdit = ref(null);
-
 const previewingVideoId = ref(null);
 const videoPlayerRefs = reactive({});
 let previewTimeoutId = null;
-
 const allAvailableTags = ref([]);
 const isLoadingTags = ref(false);
 const sortByOptions = ref([ 
@@ -203,24 +199,20 @@ const fetchAllAvailableTags = async () => {
   } catch (error) { console.error('获取所有可用标签失败:', error); allAvailableTags.value = []; }
   finally { isLoadingTags.value = false; }
 };
-
 const toggleTagInSearch = (tagName) => {
   const index = searchParams.tags.indexOf(tagName);
   if (index > -1) { searchParams.tags.splice(index, 1); } else { searchParams.tags = [tagName]; }
   triggerSearch();
 };
-
 const addTagToSearch = (tagName) => {
     if (!searchParams.tags.includes(tagName)) { searchParams.tags = [tagName]; triggerSearch(); }
     else if (searchParams.tags.length === 1 && searchParams.tags[0] === tagName) { searchParams.tags = []; triggerSearch(); }
 };
-
 const addPersonToSearch = (personName) => {
     searchParams.persons_search = personName; 
     triggerSearch();
     ElMessage.info(`按人物 "${personName}" 筛选`);
 };
-
 const setSortByAndSearch = (sortByValue) => { 
     searchParams.sortBy = sortByValue; 
     if (sortByValue === 'name') {
@@ -230,9 +222,7 @@ const setSortByAndSearch = (sortByValue) => {
     }
     triggerSearch(); 
 };
-
 const setSortOrderAndSearch = (order) => { searchParams.sortOrder = order; triggerSearch(); };
-
 const getVideoStreamUrl = (videoId) => videoId ? `${API_BASE_URL}/api/stream/${videoId}` : '';
 
 const stopPreview = (videoIdToStop) => {
@@ -272,10 +262,10 @@ const startPreview = (videoId) => {
       player.src = streamUrl;
       const onCanPlay = () => {
         player.currentTime = 0;
-        player.playbackRate = 10.;
+        player.playbackRate = 5.0;
         player.play()
           .then(() => { 
-            if (player.playbackRate !== 10.) player.playbackRate = 10.;
+            if (player.playbackRate !== 5.0) player.playbackRate = 5.0;
           })
           .catch(e => { 
             console.error(`视频ID: ${videoId} 预览播放Promise失败:`, e);
@@ -317,7 +307,6 @@ const fetchVideos = async (page = currentPage.value, size = pageSize.value) => {
       currentPage.value = page; pageSize.value = size;
     } else { 
       videos.value = []; totalVideos.value = 0; 
-      // ElMessage.error('获取到的视频数据格式不正确'); 
     }
   } catch (error) { 
     console.error('获取视频列表失败:', error.response || error); 
@@ -410,7 +399,7 @@ onMounted(() => {
 onBeforeUnmount(() => { 
     if (previewTimeoutId) clearTimeout(previewTimeoutId); 
     if (previewingVideoId.value) {
-      stopPreview(previewingVideoId.value); // 确保停止当前预览
+      stopPreview(previewingVideoId.value); 
     }
     Object.keys(videoPlayerRefs).forEach(vidId => { 
         const player = videoPlayerRefs[vidId]; 
@@ -425,9 +414,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .bili-videolist-page { padding-top: 0; }
 .sticky-controls-wrapper { position: sticky; top: 0; background-color: #f1f2f3; z-index: 10; padding-bottom: 1px; margin-bottom: -1px; }
-.sticky-controls-content { max-width: 1320px; margin: 0 auto; background-color: #fff; border-bottom: 1px solid #e3e5e7; }
+.sticky-controls-content { max-width: 1550px; margin: 0 auto; background-color: #fff; border-bottom: 1px solid #e3e5e7; }
 .bili-channel-section { margin-bottom: 0; border-bottom: none; padding: 10px 0 0 0; }
-.bili-channel-header { display: flex; align-items: center; justify-content: space-between; max-width: 1320px; margin: 0 auto; padding: 0 20px; }
+.bili-channel-header { display: flex; align-items: center; justify-content: space-between; max-width: 1550px; margin: 0 auto; padding: 0 20px; }
 .left-channel-actions, .right-channel-actions { flex-shrink: 0; }
 .channel-tags-wrapper { display: flex; flex-wrap: wrap; gap: 6px 8px; justify-content: flex-start; flex-grow: 1; overflow-x: auto; padding: 2px 0; }
 .bili-channel-button { font-size: 13px; padding: 0 10px; height: 26px; border-color: transparent; background-color: #f1f2f3; color: #61666d; border-radius: 4px; }
@@ -462,10 +451,10 @@ onBeforeUnmount(() => {
 .bili-card-title { font-size: 14px; font-weight: 500; color: #18191c; margin: 0 0 6px 0; line-height: 1.4; max-height: 2.8em; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .bili-card-tags-persons { margin-top: 4px; margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
 .info-tag { cursor: pointer; }
-.person-tag .el-icon { vertical-align: middle; }
-.bili-card-rating { margin-bottom: 4px; font-size: 12px; color: #61666d; } /* 调整文字评分样式 */
-.bili-card-rating :deep(.el-rate__icon) { margin-right: 0px; } /* 这行如果不用el-rate可以删除 */
-.bili-card-meta { font-size: 12px; color: #9499a0; line-height: 1.3; display: flex; align-items: center; gap: 6px; }
+.person-tag .el-icon { vertical-align: middle; margin-right: 2px;}
+.bili-card-rating { margin-bottom: 10px; font-size: 12px; color: #61666d; }
+.bili-card-meta { font-size: 12px; color: #9499a0; line-height: 1.3; display: flex; justify-content: space-between; align-items: center; }
+.meta-item { } 
 .bili-card-actions { position: absolute; top: -5px; right: -5px; opacity: 0; transition: opacity 0.2s; }
 .bili-video-card:hover .bili-card-actions { opacity: 1; }
 .bili-action-more-btn { padding: 4px; font-size: 16px; color: #9499a0; background-color: transparent !important; border: none !important; box-shadow: none !important; }

@@ -164,10 +164,12 @@ ul, li { list-style: none; margin: 0; padding: 0; }
   display: flex;
   justify-content: center; 
   align-items: center; 
+  min-width: 200px;
 }
 
 .bili-search-input {
-  max-width: 550px; 
+  max-width: 70%;
+  min-width: 550px; 
   width: 100%; 
 }
 

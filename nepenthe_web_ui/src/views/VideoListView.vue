@@ -62,11 +62,9 @@
                 <video 
                   v-if="previewingVideoId === video.id"
                   :ref="el => { if (el) videoPlayerRefs[video.id] = el }"
-                  :src="getVideoStreamUrl(video.id)" 
                   muted loop playsinline
                   class="bili-card-preview-player"
-                  @loadedmetadata="setPlaybackRate($event, 5.0)"
-                ></video>
+                ></video> 
                 <el-image :src="video.thumbnail_url" fit="cover" class="bili-card-thumbnail" v-show="previewingVideoId !== video.id">
                   <template #error><div class="bili-image-slot-error"><span>加载失败</span></div></template>
                   <template #placeholder><div class="bili-image-slot-placeholder"><span>加载中...</span></div></template>
@@ -147,9 +145,11 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000
 const searchParams = reactive({ searchTerm: '', tags: [], persons_search: '', min_rating: props.initialMinRating, sortBy: props.initialMinRating ? 'rating' : 'id', sortOrder: 'desc' });
 const editModalVisible = ref(false);
 const currentVideoToEdit = ref(null);
+
 const previewingVideoId = ref(null);
 const videoPlayerRefs = reactive({});
 let previewTimeoutId = null;
+
 const allAvailableTags = ref([]);
 const isLoadingTags = ref(false);
 const sortByOptions = ref([ 
@@ -159,6 +159,7 @@ const sortByOptions = ref([
   { label: '播放数量', value: 'view_count' },
   { label: '最近更新', value: 'updated_date' }
 ]);
+
 watch(() => route.query, (newQuery, oldQuery) => {
     searchParams.searchTerm = newQuery.search_term || '';
     searchParams.tags = newQuery.tags ? String(newQuery.tags).split(',').map(t => t.trim()).filter(t => t) : [];
@@ -172,14 +173,24 @@ watch(() => route.query, (newQuery, oldQuery) => {
     } else {
         searchParams.min_rating = null;
     }
+    if (newQuery.sort_by) {
+        searchParams.sortBy = newQuery.sort_by;
+    }
+    if (newQuery.sort_order) {
+        searchParams.sortOrder = newQuery.sort_order;
+    }
     if (JSON.stringify(newQuery) !== JSON.stringify(oldQuery) && !isLoading.value) {
          triggerSearch();
     }
 }, { immediate: true, deep: true });
 
- watch(() => props.initialMinRating, (newVal) => {
+watch(() => props.initialMinRating, (newVal) => {
     searchParams.min_rating = newVal;
-    searchParams.sortBy = newVal ? 'rating' : 'id';
+    if (route.name === 'FeaturedVideos' && newVal !== null) {
+        searchParams.sortBy = 'rating';
+    } else if (searchParams.sortBy === 'rating' && newVal === null) { 
+        searchParams.sortBy = sortByOptions.value[0]?.value || 'id';
+    }
     searchParams.sortOrder = 'desc';
     triggerSearch();
 });
@@ -192,137 +203,102 @@ const fetchAllAvailableTags = async () => {
   } catch (error) { console.error('获取所有可用标签失败:', error); allAvailableTags.value = []; }
   finally { isLoadingTags.value = false; }
 };
+
 const toggleTagInSearch = (tagName) => {
   const index = searchParams.tags.indexOf(tagName);
   if (index > -1) { searchParams.tags.splice(index, 1); } else { searchParams.tags = [tagName]; }
   triggerSearch();
 };
+
 const addTagToSearch = (tagName) => {
     if (!searchParams.tags.includes(tagName)) { searchParams.tags = [tagName]; triggerSearch(); }
     else if (searchParams.tags.length === 1 && searchParams.tags[0] === tagName) { searchParams.tags = []; triggerSearch(); }
 };
+
 const addPersonToSearch = (personName) => {
     searchParams.persons_search = personName; 
     triggerSearch();
     ElMessage.info(`按人物 "${personName}" 筛选`);
 };
-const setSortByAndSearch = (sortByValue) => { searchParams.sortBy = sortByValue; triggerSearch(); };
-const setSortOrderAndSearch = (order) => { searchParams.sortOrder = order; triggerSearch(); };
-const getVideoStreamUrl = (videoId) => videoId ? `${API_BASE_URL}/api/stream/${videoId}` : '';
-const startPreview = (videoId) => {
-  if (previewTimeoutId) clearTimeout(previewTimeoutId);
-  previewTimeoutId = setTimeout(() => {
-    previewingVideoId.value = videoId;
-    nextTick(() => {
-      const player = videoPlayerRefs[videoId];
-      if (player) {
-        console.log(`尝试预览播放视频ID: ${videoId}, 播放器元素:`, player);
-        player.currentTime = 0;
-        player.playbackRate = 5.0; 
-        player.play()
-          .then(() => {
-            console.log(`视频ID: ${videoId} 预览已开始播放。`);
-            
-            if (player.playbackRate !== 5.0) {
-                player.playbackRate = 5.0;
-            }
-          })
-          .catch(e => {
-            console.error(`视频ID: ${videoId} 预览播放失败:`, e);
-          });
-      } else {
-        console.warn(`预览播放器未找到 for videoId: ${videoId}`);
-      }
-    });
-  }, 300);
+
+const setSortByAndSearch = (sortByValue) => { 
+    searchParams.sortBy = sortByValue; 
+    if (sortByValue === 'name') {
+        searchParams.sortOrder = 'asc';
+    } else {
+        searchParams.sortOrder = 'desc';
+    }
+    triggerSearch(); 
 };
 
-const stopPreview = (videoId) => {
-  if (previewTimeoutId) clearTimeout(previewTimeoutId);
-  if (previewingVideoId.value === videoId) {
-    const player = videoPlayerRefs[videoId];
-    if (player) player.pause();
-    previewingVideoId.value = null;
-  }
-};
+const setSortOrderAndSearch = (order) => { searchParams.sortOrder = order; triggerSearch(); };
+
+const getVideoStreamUrl = (videoId) => videoId ? `${API_BASE_URL}/api/stream/${videoId}` : '';
+
 const stopPreview = (videoIdToStop) => {
-  console.log(`[前端 stopPreview] 请求停止预览视频ID: ${videoIdToStop}, 当前正在预览: ${previewingVideoId.value}`);
   if (previewTimeoutId) {
     clearTimeout(previewTimeoutId);
     previewTimeoutId = null;
   }
-  
   if (previewingVideoId.value === videoIdToStop) {
     const player = videoPlayerRefs[videoIdToStop];
     if (player) {
-      console.log(`[前端 stopPreview] 找到播放器 for ${videoIdToStop}, 当前状态 paused: ${player.paused}, src: ${player.currentSrc}`);
-      player.pause(); 
-      
-      player.src = ""; 
+      if (!player.paused) {
+        player.pause();
+      }
       player.removeAttribute('src'); 
       player.load(); 
-      console.log(`[前端 stopPreview] 视频ID: ${videoIdToStop} 预览已停止并清理。`);
-      
-    } else {
-      console.warn(`[前端 stopPreview] 未找到播放器 for ${videoIdToStop} 来停止。`);
     }
     previewingVideoId.value = null;
   }
 };
 
 const startPreview = (videoId) => {
-  
-  
   if (previewingVideoId.value && previewingVideoId.value !== videoId) {
     stopPreview(previewingVideoId.value);
   }
-  
-  if (previewTimeoutId) clearTimeout(previewTimeoutId);
-
+  if (previewTimeoutId) {
+    clearTimeout(previewTimeoutId);
+  }
   previewTimeoutId = setTimeout(async () => {
     if (previewingVideoId.value === videoId && videoPlayerRefs[videoId] && !videoPlayerRefs[videoId].paused) {
       return; 
     }
-
     previewingVideoId.value = videoId;
     await nextTick(); 
-
     const player = videoPlayerRefs[videoId];
     if (player) {
       const streamUrl = getVideoStreamUrl(videoId);
-      console.log(`[前端 startPreview] 尝试为视频ID ${videoId} 设置 src: ${streamUrl}`);
-      player.src = streamUrl; 
-      
+      player.src = streamUrl;
       const onCanPlay = () => {
-         console.log(`[前端 startPreview] 视频ID ${videoId} canplay 事件触发。`);
-         player.currentTime = 0;
-         player.playbackRate = 5.0;
-         player.play()
-           .then(() => { console.log(`视频ID: ${videoId} 预览已开始播放。`);})
-           .catch(e => { 
-               console.error(`视频ID: ${videoId} 预览播放Promise失败:`, e);
-               if (previewingVideoId.value === videoId) stopPreview(videoId); 
-           });
-         player.removeEventListener('canplay', onCanPlay); 
-         player.removeEventListener('error', onError);
+        player.currentTime = 0;
+        player.playbackRate = 10.;
+        player.play()
+          .then(() => { 
+            if (player.playbackRate !== 10.) player.playbackRate = 10.;
+          })
+          .catch(e => { 
+            console.error(`视频ID: ${videoId} 预览播放Promise失败:`, e);
+            if (previewingVideoId.value === videoId) stopPreview(videoId);
+          });
+        player.removeEventListener('canplay', onCanPlay);
+        player.removeEventListener('error', onError);
       };
       const onError = (e) => {
-         console.error(`[前端 startPreview] 视频ID ${videoId} 加载或播放时发生错误事件:`, e);
-         if (previewingVideoId.value === videoId) stopPreview(videoId);
-         player.removeEventListener('canplay', onCanPlay);
-         player.removeEventListener('error', onError);
+        console.error(`视频ID: ${videoId} 加载或播放时发生错误事件:`, e);
+        if (previewingVideoId.value === videoId) stopPreview(videoId);
+        player.removeEventListener('canplay', onCanPlay);
+        player.removeEventListener('error', onError);
       };
       player.addEventListener('canplay', onCanPlay);
       player.addEventListener('error', onError);
-      player.load(); 
-
+      player.load();
     } else {
-      console.warn(`预览播放器未找到 for videoId: ${videoId}`);
       if (previewingVideoId.value === videoId) stopPreview(videoId);
     }
   }, 300); 
 };
-const setPlaybackRate = (event, rate) => { if (event.target) event.target.playbackRate = rate; };
+
 const fetchVideos = async (page = currentPage.value, size = pageSize.value) => {
   isLoading.value = true;
   try {
@@ -339,10 +315,19 @@ const fetchVideos = async (page = currentPage.value, size = pageSize.value) => {
       videos.value = response.data.videos.map(video => ({ ...video, thumbnail_url: video.thumbnail_url ? `${API_BASE_URL}${video.thumbnail_url}` : null, added_date: video.added_date ? new Date(video.added_date) : null }));
       totalVideos.value = response.data.total_count || 0;
       currentPage.value = page; pageSize.value = size;
-    } else { videos.value = []; totalVideos.value = 0; ElMessage.error('获取到的视频数据格式不正确');}
-  } catch (error) { console.error('获取视频列表失败:', error); videos.value = []; totalVideos.value = 0; ElMessage.error('获取视频列表失败，请检查后端服务。');}
-  finally { isLoading.value = false; }
+    } else { 
+      videos.value = []; totalVideos.value = 0; 
+      // ElMessage.error('获取到的视频数据格式不正确'); 
+    }
+  } catch (error) { 
+    console.error('获取视频列表失败:', error.response || error); 
+    videos.value = []; totalVideos.value = 0; 
+    ElMessage.error('获取视频列表失败，请检查后端服务或网络连接。');
+  } finally { 
+    isLoading.value = false; 
+  }
 };
+
 const triggerSearch = () => { 
     currentPage.value = 1; 
     const query = { }; 
@@ -350,20 +335,31 @@ const triggerSearch = () => {
     if (searchParams.tags.length > 0) query.tags = searchParams.tags.join(',');
     if (searchParams.persons_search) query.persons_search = searchParams.persons_search;
     if (searchParams.min_rating !== null) query.min_rating = searchParams.min_rating.toString();
+    if (searchParams.sortBy && searchParams.sortBy !== (props.initialMinRating && route.name === 'FeaturedVideos' ? 'rating' : (sortByOptions.value[0]?.value || 'id'))) {
+        query.sort_by = searchParams.sortBy;
+    }
+    if (searchParams.sortOrder && searchParams.sortOrder !== 'desc') {
+         query.sort_order = searchParams.sortOrder;
+    }
+
     if (Object.keys(query).length > 0 || route.name === 'VideoList') {
          if(JSON.stringify(query) !== JSON.stringify(route.query)) { 
             router.replace({ name: route.name || 'VideoList', query: query }); 
+         } else { 
+             fetchVideos();
          }
     } else if (Object.keys(route.query).length > 0 && route.name !== 'FeaturedVideos') {
         router.replace({ name: route.name || 'VideoList', query: {} });
+    } else { 
+        fetchVideos();
     }
-    fetchVideos(); 
 };
+
 const resetSearchAndFetch = () => { 
     searchParams.searchTerm = ''; searchParams.tags = []; searchParams.persons_search = ''; 
     const isFeaturedPage = route.name === 'FeaturedVideos';
     searchParams.min_rating = isFeaturedPage ? props.initialMinRating : null; 
-    searchParams.sortBy = isFeaturedPage ? 'rating' : 'id'; 
+    searchParams.sortBy = isFeaturedPage ? 'rating' : (sortByOptions.value[0]?.value || 'id'); 
     searchParams.sortOrder = 'desc'; 
     const query = {}; 
     if (isFeaturedPage && props.initialMinRating !== null) {
@@ -372,8 +368,10 @@ const resetSearchAndFetch = () => {
     router.replace({ name: route.name || 'VideoList', query: query }); 
     fetchVideos(); 
 }; 
+
 const formatDuration = (seconds) => { if (seconds === null || seconds === undefined || isNaN(seconds) || seconds < 0) return '0:00'; const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = Math.round(seconds % 60); if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`; return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`; };
 const formatRelativeDate = (date) => { if (!date) return ''; try { return formatDistanceToNowStrict(date, { addSuffix: true, locale: zhCN }); } catch (e) { return '日期未知'; } };
+
 const navigateToPlayer = (videoId) => { 
     if (!videoId) return; 
     if (previewingVideoId.value) stopPreview(previewingVideoId.value); 
@@ -381,14 +379,16 @@ const navigateToPlayer = (videoId) => {
     if (videoToPlay && videoToPlay.path) {
         if (window.electronAPI && typeof window.electronAPI.playVideoLocally === 'function') {
             window.electronAPI.playVideoLocally(videoToPlay.path);
-            axios.post(`${API_BASE_URL}/api/videos/${videoId}/view`).catch(error => {console.error('更新观看次数失败:', error);});
-        } else { console.error('electronAPI.playVideoLocally 不可用。'); ElMessage.error('无法调用本地播放器，桌面环境API未找到。'); }
+            axios.post(`${API_BASE_URL}/api/videos/${videoId}/view`).catch(error => {});
+        } else { ElMessage.error('无法调用本地播放器，桌面环境API未找到。'); }
     } else { ElMessage.error('未找到视频文件路径，无法播放。'); }
 };
+
 const handleCurrentPageChange = (newPage) => { fetchVideos(newPage, pageSize.value); };
 const handlePageSizeChange = (newSize) => { fetchVideos(1, newSize); };
 const openEditModal = (video) => { currentVideoToEdit.value = JSON.parse(JSON.stringify(video)); editModalVisible.value = true; };
 const handleVideoUpdated = (updatedVideo) => { ElMessage.success('视频信息更新成功！'); fetchVideos(currentPage.value, pageSize.value); fetchAllAvailableTags(); };
+
 const handleDeleteVideo = async (videoToDelete) => {
     try {
         await ElMessageBox.confirm( `确定将视频 "${videoToDelete.name}" 发送到回收站吗？`, '删除确认', { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning', draggable: true, });
@@ -398,17 +398,28 @@ const handleDeleteVideo = async (videoToDelete) => {
         videos.value = videos.value.filter(v => v.id !== videoToDelete.id);
         totalVideos.value = Math.max(0, totalVideos.value -1); 
         fetchAllAvailableTags();
-    } catch (error) { if (error !== 'cancel') { console.error('删除视频失败:', error); ElMessage.error(error.response?.data?.detail || '删除视频失败，请稍后再试。'); } }
+    } catch (error) { if (error !== 'cancel') { ElMessage.error(error.response?.data?.detail || '删除视频失败，请稍后再试。'); } }
     finally { isLoading.value = false; }
 };
 const handleCardCommand = (command) => { if (command.action === 'edit') { openEditModal(command.video); } else if (command.action === 'delete') { handleDeleteVideo(command.video); } };
 
 onMounted(() => { 
-    //console.log('[VideoListView onMounted] 组件已挂载，调用 fetchAllAvailableTags 和 triggerSearch。');
     fetchAllAvailableTags(); 
     triggerSearch();
 });
-onBeforeUnmount(() => { if (previewTimeoutId) clearTimeout(previewTimeoutId); Object.keys(videoPlayerRefs).forEach(vidId => { const player = videoPlayerRefs[vidId]; if (player && typeof player.pause === 'function') player.pause(); }); });
+onBeforeUnmount(() => { 
+    if (previewTimeoutId) clearTimeout(previewTimeoutId); 
+    if (previewingVideoId.value) {
+      stopPreview(previewingVideoId.value); // 确保停止当前预览
+    }
+    Object.keys(videoPlayerRefs).forEach(vidId => { 
+        const player = videoPlayerRefs[vidId]; 
+        if (player && typeof player.pause === 'function') {
+            try { player.pause(); player.removeAttribute('src'); player.load(); } catch(e){}
+        }
+        delete videoPlayerRefs[vidId];
+    }); 
+});
 </script>
 
 <style scoped>
@@ -452,8 +463,8 @@ onBeforeUnmount(() => { if (previewTimeoutId) clearTimeout(previewTimeoutId); Ob
 .bili-card-tags-persons { margin-top: 4px; margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
 .info-tag { cursor: pointer; }
 .person-tag .el-icon { vertical-align: middle; }
-.bili-card-rating { margin-bottom: 4px; }
-.bili-card-rating :deep(.el-rate__icon) { margin-right: 0px; }
+.bili-card-rating { margin-bottom: 4px; font-size: 12px; color: #61666d; } /* 调整文字评分样式 */
+.bili-card-rating :deep(.el-rate__icon) { margin-right: 0px; } /* 这行如果不用el-rate可以删除 */
 .bili-card-meta { font-size: 12px; color: #9499a0; line-height: 1.3; display: flex; align-items: center; gap: 6px; }
 .bili-card-actions { position: absolute; top: -5px; right: -5px; opacity: 0; transition: opacity 0.2s; }
 .bili-video-card:hover .bili-card-actions { opacity: 1; }

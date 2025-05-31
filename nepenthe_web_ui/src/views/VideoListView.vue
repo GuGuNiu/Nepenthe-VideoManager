@@ -112,7 +112,7 @@
         :total="totalVideos"
         :current-page="currentPage"
         :page-size="pageSize"
-        :page-sizes="[10, 25, 50, 100]"
+        :page-sizes="[12, 24, 48, 96]"
         @current-change="handleCurrentPageChange"
         @size-change="handlePageSizeChange"
       />
@@ -137,7 +137,7 @@ const route = useRoute();
 const videos = ref([]);
 const isLoading = ref(true);
 const currentPage = ref(1);
-const pageSize = ref(25);
+const pageSize = ref(24);
 const totalVideos = ref(0);
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 const searchParams = reactive({ searchTerm: '', tags: [], persons_search: '', min_rating: props.initialMinRating, sortBy: props.initialMinRating ? 'rating' : 'id', sortOrder: 'desc' });
@@ -375,9 +375,11 @@ const navigateToPlayer = (videoId) => {
 
 const handleCurrentPageChange = (newPage) => { fetchVideos(newPage, pageSize.value); };
 const handlePageSizeChange = (newSize) => { fetchVideos(1, newSize); };
-const openEditModal = (video) => { currentVideoToEdit.value = JSON.parse(JSON.stringify(video)); editModalVisible.value = true; };
+const openEditModal = (video) => { 
+  currentVideoToEdit.value = JSON.parse(JSON.stringify(video)); // 使用深拷贝确保是独立对象
+  editModalVisible.value = true; 
+};
 const handleVideoUpdated = (updatedVideo) => { ElMessage.success('视频信息更新成功！'); fetchVideos(currentPage.value, pageSize.value); fetchAllAvailableTags(); };
-
 const handleDeleteVideo = async (videoToDelete) => {
     try {
         await ElMessageBox.confirm( `确定将视频 "${videoToDelete.name}" 发送到回收站吗？`, '删除确认', { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning', draggable: true, });
@@ -459,7 +461,7 @@ onBeforeUnmount(() => {
 .bili-video-card:hover .bili-card-actions { opacity: 1; }
 .bili-action-more-btn { padding: 4px; font-size: 16px; color: #9499a0; background-color: transparent !important; border: none !important; box-shadow: none !important; }
 .bili-action-more-btn:hover { background-color: #e3e5e7 !important; }
-.bili-pagination-container { margin-top: 30px; display: flex; justify-content: center; padding: 0 20px; }
+.bili-pagination-container { margin-top: 30px;  margin-bottom: 20px; display: flex; justify-content: center; padding: 0 20px; }
 .bili-pagination-container :deep(.el-pagination.is-background .el-pager li:not(.is-disabled).is-active) { background-color: var(--el-color-primary) !important; }
 .bili-pagination-container :deep(.el-pagination.is-background .el-pager li:not(.is-disabled):hover) { color: var(--el-color-primary) !important; }
 .delete-item { color: var(--el-color-danger); }

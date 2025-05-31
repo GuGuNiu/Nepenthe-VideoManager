@@ -31,8 +31,8 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow({
-    width: 1600,
-    height: 900,
+    width: 1800,
+    height: 1000,
     webPreferences: {
       preload: preloadScriptPath,
       contextIsolation: true,
@@ -130,5 +130,14 @@ ipcMain.on('play-video-locally', (event, videoPath) => {
       });
   } else {
     console.error('[MainProcess] IPC \'play-video-locally\': Received invalid videoPath:', videoPath);
+  }
+});
+
+ipcMain.on('show-item-in-folder', (event, itemPath) => {
+  if (itemPath && typeof itemPath === 'string') {
+    console.log(`[MainProcess] IPC 'show-item-in-folder': Received request for path: ${itemPath}`);
+    shell.showItemInFolder(itemPath); 
+  } else {
+    console.error('[MainProcess] IPC \'show-item-in-folder\': Received invalid itemPath:', itemPath);
   }
 });

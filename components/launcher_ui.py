@@ -123,30 +123,29 @@ class UIManager:
 
 
     def log_message(self, message):
-       
-        if "logs_textbox" in self.elements:
+        if "logs_textbox" in self.elements and self.elements["logs_textbox"].winfo_exists():
             self.elements["logs_textbox"].configure(state="normal")
             self.elements["logs_textbox"].insert("end", message + "\n")
             self.elements["logs_textbox"].configure(state="disabled")
             self.elements["logs_textbox"].see("end")
+        else:
+            print(f"[UIManager Log Direct] {message}") # Fallback if textbox not ready
 
     def update_status_display(self, status_text):
-       
         self.status_var.set(status_text)
         is_running = status_text == "运行中"
         is_starting_stopping = status_text in ["启动中...", "停止中..."]
 
-        if "start_button" in self.elements:
+        if "start_button" in self.elements and self.elements["start_button"].winfo_exists():
             self.elements["start_button"].configure(state="disabled" if is_running or is_starting_stopping else "normal")
-        if "stop_button" in self.elements:
+        if "stop_button" in self.elements and self.elements["stop_button"].winfo_exists():
             self.elements["stop_button"].configure(state="disabled" if not is_running or is_starting_stopping else "normal")
-        if "open_ui_button" in self.elements:
+        if "open_ui_button" in self.elements and self.elements["open_ui_button"].winfo_exists():
             self.elements["open_ui_button"].configure(state="normal" if is_running else "disabled")
         self._update_scan_button_state()
-
+        
     def _update_scan_button_state(self):
-        """根据后端运行状态更新扫描按钮的可用性"""
-        if "scan_library_button" in self.elements:
+        if "scan_library_button" in self.elements and self.elements["scan_library_button"].winfo_exists():
             if backend_manager.is_running():
                 self.elements["scan_library_button"].configure(state="normal")
             else:
@@ -201,9 +200,36 @@ class UIManager:
         cfg = config.current_config
         video_paths_str = ",".join(cfg.get("video_paths", []))
         backend_script_relative_path = cfg.get("backend_script_path", "run_backend_server.py")
-        success = backend_manager.start(backend_script_relative_path, cfg.get("api_host", "127.0.0.1"), cfg.get("api_port", "8000"), video_paths_str)
+        
+        # 在开发模式下，我们让后端使用其自身的默认数据路径
+        # 只有在打包后，Electron才会指定数据路径
+        # 因此，这里传递 None 给 db_file_full_path 和 thumbnails_storage_full_path
+        # 后端的 argparse 会接收到 None，然后 update_settings_from_args 不会覆盖它们
+        # 从而 settings 对象的 @property 会使用 _data_storage_dir_default_for_dev
+        
+        dev_db_file_path_for_cmd = None # 传递 None，让后端使用自己的默认
+        dev_thumbnails_storage_path_for_cmd = None # 传递 None
+
+        # FFmpeg/FFprobe 路径仍然可以从启动器配置中读取并传递
+        ffmpeg_path = cfg.get("ffmpeg_path") 
+        ffprobe_path = cfg.get("ffprobe_path")
+
+        self.log_message(f"启动器: 准备启动后端 (开发模式 - 后端将使用其默认数据路径)。")
+        if ffmpeg_path: self.log_message(f"  FFmpeg可执行文件 (若配置): {ffmpeg_path}")
+        if ffprobe_path: self.log_message(f"  FFprobe可执行文件 (若配置): {ffprobe_path}")
+
+        success = backend_manager.start(
+            script_path=backend_script_relative_path, 
+            host=cfg.get("api_host", "127.0.0.1"), 
+            port=cfg.get("api_port", "8000"), 
+            video_paths_str=video_paths_str,
+            db_file_full_path=dev_db_file_path_for_cmd, # 传递 None
+            thumbnails_storage_full_path=dev_thumbnails_storage_path_for_cmd, # 传递 None
+            ffmpeg_exec_path=ffmpeg_path,
+            ffprobe_exec_path=ffprobe_path
+        )
         if not success and not backend_manager.is_running():
-             messagebox.showerror("启动失败", "启动后端失败，请检查日志。")
+             messagebox.showerror("启动失败", "启动后端服务失败，请检查运行日志获取详细信息。")
         self._update_scan_button_state()
 
     def _stop_backend_action_ui(self):

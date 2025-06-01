@@ -1,7 +1,9 @@
 import subprocess
 import threading
 import os
-import sys 
+import sys
+import traceback
+from typing import Optional 
 
 backend_process = None
 on_log_message_callback = None
@@ -25,21 +27,14 @@ def _update_status(status_text):
 
 def _read_stream(stream, is_stderr=False):
     prefix = "[后端错误]" if is_stderr else "[后端输出]"
-    
-    
-    
-    
-    
     for line_bytes in iter(stream.readline, b''): 
         try:
-            
             line_str = line_bytes.decode('utf-8').strip()
         except UnicodeDecodeError:
             try:
                 line_str = line_bytes.decode(sys.getdefaultencoding(), errors='replace').strip()
             except Exception: 
                  line_str = line_bytes.decode('latin-1', errors='replace').strip() 
-        
         _log_direct(f"{prefix} {line_str}")
     stream.close()
 
@@ -53,12 +48,16 @@ def _monitor_process():
         backend_process = None 
         _update_status("已停止") 
 
-def start(script_path, host, port, video_paths_str):
+def start(script_path, host, port, video_paths_str, 
+          db_file_full_path: Optional[str] = None, # 改为 Optional，默认 None
+          thumbnails_storage_full_path: Optional[str] = None, # 改为 Optional，默认 None
+          ffmpeg_exec_path: Optional[str] = None,
+          ffprobe_exec_path: Optional[str] = None
+          ):
     global backend_process
     if backend_process and backend_process.poll() is None: 
         _log_direct("后端已在运行或启动中。")
         return False
-
     
     if not os.path.exists(script_path) or not os.path.isfile(script_path):
         _log_direct(f"后端脚本未找到: {script_path}")
@@ -69,20 +68,25 @@ def start(script_path, host, port, video_paths_str):
     _log_direct("尝试启动后端...")
 
     try:
-        
         python_executable = sys.executable 
-        
-        
         cmd = [
             python_executable, "-u", script_path, 
             "--host", host,
-            "--port", port,
+            "--port", str(port), # 确保端口是字符串
             "--video_paths", video_paths_str
         ]
+        # 只有当路径被提供时才添加到命令行参数
+        if db_file_full_path:
+            cmd.extend(["--db-file-path", db_file_full_path])
+        if thumbnails_storage_full_path:
+            cmd.extend(["--thumbnails-storage-path", thumbnails_storage_full_path])
+        if ffmpeg_exec_path:
+            cmd.extend(["--ffmpeg-path", ffmpeg_exec_path])
+        if ffprobe_exec_path:
+            cmd.extend(["--ffprobe-path", ffprobe_exec_path])
         
         _log_direct(f"执行命令: {' '.join(cmd)}")
         _log_direct(f"使用的Python解释器: {python_executable}")
-
 
         startupinfo = None
         creation_flags = 0 
@@ -91,25 +95,8 @@ def start(script_path, host, port, video_paths_str):
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE 
             creation_flags = subprocess.CREATE_NO_WINDOW 
-
-        
         
         process_env = os.environ.copy()
-
-        
-        
-        
-        
-
-        
-        
-        
-        
-        
-        
-        
-
-
         backend_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -120,15 +107,14 @@ def start(script_path, host, port, video_paths_str):
         )
         _log_direct(f"后端进程已启动 (PID: {backend_process.pid})。")
         _update_status("运行中")
-
         
         threading.Thread(target=_read_stream, args=(backend_process.stdout,), daemon=True).start()
         threading.Thread(target=_read_stream, args=(backend_process.stderr, True), daemon=True).start()
-        
         threading.Thread(target=_monitor_process, daemon=True).start()
         return True
     except Exception as e:
         _log_direct(f"启动后端失败: {str(e)}")
+        _log_direct(traceback.format_exc()) # 打印完整的错误栈
         backend_process = None 
         _update_status("错误")
         return False

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Response
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func, or_, and_
+from sqlalchemy import func, or_, and_, desc
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
@@ -55,7 +55,11 @@ class VideoUpdate(BaseModel):
     tags: Optional[List[str]] = Field(None)
     persons: Optional[List[str]] = Field(None)
     rating: Optional[float] = Field(None, ge=0, le=5) 
-
+class LibraryStatsResponse(BaseModel):
+    total_videos: int
+    total_size_bytes: Optional[int] = None 
+    last_scan_time: Optional[datetime] = None
+    # 你可以根据需要添加 model_config = ConfigDict(from_attributes=True) 如果需要从 ORM 对象转换
 
 @router.get("/")
 async def read_api_root(): return {"message": "欢迎使用忘忧露视频管理 API！ (API 根路径)"}
@@ -282,17 +286,32 @@ async def delete_video_to_trash(video_id: int, db: Session = Depends(get_db)):
     return {"message": f"视频 '{video_name}' 已发送到回收站并从数据库移除。"}
 
 @router.post("/scan-library")
-async def scan_library_api(background_tasks: BackgroundTasks):
+async def scan_library_api(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     def scan_in_background_with_new_session():
-        db_bg = next(get_db())
+        # 注意：这里不能直接使用外层函数的 db session，因为 background_tasks 在不同线程/上下文
+        # 每次后台任务都应该获取自己的 session
+        db_bg = next(get_db()) # 获取新的 session
         try:
+            # 从 settings 获取最新的 video_paths 和 thumbnails_storage_path
+            current_video_paths = settings.video_paths 
+            current_thumbnails_path = settings.thumbnails_storage_path
+
+            print(f"[API scan-library] 后台任务开始扫描。路径: {current_video_paths}, 缩略图目录: {current_thumbnails_path}")
             video_scanner.scan_video_folders_and_save(
-                db_bg, video_paths_to_scan=settings.video_paths,
-                current_thumbnails_storage_path=settings.thumbnails_storage_path,
+                db_bg, 
+                video_paths_to_scan=current_video_paths,
+                current_thumbnails_storage_path=current_thumbnails_path,
                 process_existing_missing_metadata=True 
             )
-        except Exception as e: traceback.print_exc()
-        finally: db_bg.close()
+            # 扫描完成后，可以更新“上次扫描时间”
+            # 例如，保存到 electron-store (通过主进程IPC) 或一个简单的配置文件/数据库记录
+            # store_last_scan_time(datetime.now()) # 假设有这样的函数
+        except Exception as e:
+            print(f"[API scan-library] 后台扫描任务发生错误: {e}")
+            traceback.print_exc()
+        finally:
+            db_bg.close() # 关闭后台任务的 session
+
     background_tasks.add_task(scan_in_background_with_new_session)
     return {"message": "视频库扫描任务已在后台启动。"}
 
@@ -400,3 +419,37 @@ async def stream_video(video_id: int, request: Request, db: Session = Depends(ge
                 print(f"[API Stream - Simpler] Full stream for {file_path} finished or terminated.")
 
         return StreamingResponse(full_iterfile_sync(), status_code=status_code, headers=headers, media_type=content_type)
+    
+@router.get("/library/stats", response_model=LibraryStatsResponse)
+async def get_library_stats(db: Session = Depends(get_db)):
+    try:
+        total_videos = db.query(func.count(models.Video.id)).scalar()
+        
+        # 获取上次扫描时间：
+        # 这需要你有一个地方存储这个信息。
+        # 方案1: 查找最新添加的视频的 added_date (不完全准确，但简单)
+        last_added_video = db.query(models.Video).order_by(desc(models.Video.added_date)).first()
+        last_scan_approx = last_added_video.added_date if last_added_video else None
+        
+        # 方案2: (更好) 在数据库中创建一个专门的表或键值存储来记录上次扫描完成时间。
+        # 例如，一个简单的 'app_metadata' 表，有一行记录 'last_scan_completed_at'.
+        # 这里我们先用方案1的近似值。
+
+        # 计算总大小 (可选，可能非常耗时)
+        total_size = 0
+        all_videos_for_size = db.query(models.Video.path).all()
+        for video_row in all_videos_for_size:
+            if video_row.path and os.path.exists(video_row.path):
+                try:
+                    total_size += os.path.getsize(video_row.path)
+                except OSError:
+                    pass #忽略无法访问的文件
+
+        return LibraryStatsResponse(
+            total_videos=total_videos or 0,
+            total_size_bytes=total_size, # 如果计算了总大小
+            last_scan_time=last_scan_approx
+        )
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取媒体库统计信息失败: {str(e)}")

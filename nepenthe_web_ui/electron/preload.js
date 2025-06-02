@@ -1,17 +1,25 @@
-const { contextBridge, ipcRenderer } = require('electron');
-
-//console.log('[预加载脚本] 尝试执行 (CJS 版本)。');
+const { contextBridge, ipcRenderer } = require("electron");
 
 try {
-  contextBridge.exposeInMainWorld('electronAPI', {
-    playVideoLocally: (filePath) => {
-      //console.log('[预加载脚本] IPC: 发送 play-video-locally 消息，路径 (CJS):', filePath);
-      ipcRenderer.send('play-video-locally', filePath);
+  contextBridge.exposeInMainWorld("electronApp", {
+    getAppConfig: async () => ipcRenderer.invoke("get-all-configs"),
+    getConfigKey: (key) => ipcRenderer.invoke("get-config", key),
+    setConfigKey: (key, value) => ipcRenderer.invoke("set-config", key, value),
+    getPlatform: () => ipcRenderer.invoke("get-platform"),
+    browseDirectory: () => ipcRenderer.invoke("browse-directory"),
+    browseFile: (options) => ipcRenderer.invoke("browse-file", options),
+    playVideoLocally: (videoPath) => ipcRenderer.send("play-video-locally", videoPath),
+    showItemInFolder: (itemPath) => ipcRenderer.send("show-item-in-folder", itemPath),
+    onBackendLogMessage: (callback) => {
+      const listener = (_event, message) => callback(message);
+      ipcRenderer.on("backend-log-message", listener);
+      return () => ipcRenderer.removeListener("backend-log-message", listener);
     },
-
-    showItemInFolder: (itemPath) => ipcRenderer.send('show-item-in-folder', itemPath) 
+    openExternal: (url) => ipcRenderer.send("open-external-link", url),
+    getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+    checkInitialConfigStatus: () => ipcRenderer.invoke("check-initial-config-status"), 
+    onShowInitialSetup: (callback) => ipcRenderer.on("show-initial-setup", (_event, needsSetup) => callback(needsSetup)),
   });
-  //console.log('[预加载脚本] electronAPI 已成功暴露 (CJS 版本)。');
 } catch (error) {
-  console.error('[预加载脚本] 暴露 electronAPI 时发生错误 (CJS 版本):', error);
+  console.error("[PreloadScript] Error exposing API to renderer:", error);
 }

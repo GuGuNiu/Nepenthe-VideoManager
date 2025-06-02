@@ -1,4 +1,3 @@
-# config/backend_settings.py
 import os
 from typing import Optional
 from pydantic_settings import BaseSettings
@@ -7,11 +6,6 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     video_paths: list[str] = []
-    
-    # 尝试更动态地获取项目根目录，假设此配置文件在项目根的子目录中
-    # __file__ 是当前文件 (config/backend_settings.py)
-    # os.path.dirname(__file__) 是 config 目录
-    # os.path.dirname(os.path.dirname(__file__)) 是项目根目录
     _nepenthe_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     _data_storage_dir_default_for_dev = os.path.join(_nepenthe_project_root, "data")

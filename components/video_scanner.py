@@ -1,12 +1,11 @@
-# components/video_scanner.py
 import os
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import func, or_, and_, desc
 from components import database_models as models
-from config import backend_settings as settings
-from . import video_metadata_extractor # 导入元数据提取器
+from . import video_metadata_extractor 
+from typing import List 
 
-SUPPORTED_VIDEO_EXTENSIONS = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv"]
+SUPPORTED_VIDEO_EXTENSIONS = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts"]
 
 def _process_video_metadata_and_thumbnail(db: Session, video: models.Video, current_thumbnails_storage_path: str):
     if not video.id:
@@ -153,3 +152,74 @@ def scan_video_folders_and_save(db: Session, video_paths_to_scan: list[str], cur
 
     total_videos_in_db = db.query(models.Video).count()
     print(f"视频库扫描和处理全部完成。数据库中总视频数: {total_videos_in_db}")
+
+def scan_video_folders_and_save(
+    db: Session, 
+    video_paths_to_scan: List[str], # 使用 typing.List
+    current_thumbnails_storage_path: str, 
+    process_existing_missing_metadata: bool = False
+):
+    print(f"[Scanner] 开始视频库扫描。待扫描路径: {video_paths_to_scan}, 缩略图存储: {current_thumbnails_storage_path}")
+    if not video_paths_to_scan:
+        print("[Scanner] 未提供视频库路径，扫描中止。")
+        return {"message": "未提供视频库路径", "total_videos_in_db": db.query(func.count(models.Video.id)).scalar() or 0}
+
+    processed_paths_this_scan = set()
+    newly_added_videos_this_scan = []
+    
+    for folder_path in video_paths_to_scan:
+        # ... (扫描文件夹，添加新视频到 newly_added_videos_this_scan 的逻辑，与你之前能工作的版本一致) ...
+        # ... (确保在添加新视频后，执行 db.commit() 使它们获得 ID) ...
+        abs_folder_path = os.path.abspath(folder_path)
+        if abs_folder_path in processed_paths_this_scan: continue
+        if not os.path.isdir(abs_folder_path):
+            print(f"[Scanner] 警告: 视频文件夹路径无效: {abs_folder_path}"); processed_paths_this_scan.add(abs_folder_path); continue
+        print(f"[Scanner] 正在扫描文件夹: {abs_folder_path}"); processed_paths_this_scan.add(abs_folder_path)
+        for root, _, files in os.walk(abs_folder_path):
+            for file in files:
+                if any(file.lower().endswith(ext) for ext in SUPPORTED_VIDEO_EXTENSIONS):
+                    file_path = os.path.join(root, file)
+                    existing_video = db.query(models.Video).filter(models.Video.path == file_path).first()
+                    if not existing_video:
+                        video = models.Video(name=os.path.basename(file_path), path=file_path, folder=abs_folder_path) # 使用 os.path.basename
+                        db.add(video) 
+                        newly_added_videos_this_scan.append(video)
+    
+    if newly_added_videos_this_scan:
+        try:
+            db.commit()
+            print(f"[Scanner] {len(newly_added_videos_this_scan)} 个新视频已初步添加到数据库。")
+            for video_obj in newly_added_videos_this_scan:
+                if not video_obj.id: db.refresh(video_obj)
+        except Exception as e:
+            db.rollback()
+            print(f"[Scanner] 添加新视频到数据库失败: {e}")
+            newly_added_videos_this_scan = [] 
+
+    videos_to_process_queue = [v for v in newly_added_videos_this_scan if v.id] # 只处理有ID的新视频
+    if process_existing_missing_metadata:
+        # ... (添加已存在但缺少元数据的视频到队列的逻辑) ...
+        existing_videos_missing_data = db.query(models.Video).filter(
+            or_(models.Video.duration.is_(None), models.Video.width.is_(None), models.Video.height.is_(None), models.Video.thumbnail_path.is_(None))
+        ).all()
+        existing_video_ids_in_queue = {v.id for v in videos_to_process_queue}
+        for ev in existing_videos_missing_data:
+            if ev.id not in existing_video_ids_in_queue: videos_to_process_queue.append(ev)
+    
+    if videos_to_process_queue:
+        print(f"[Scanner] 开始为 {len(videos_to_process_queue)} 个视频提取元数据和生成缩略图...")
+        any_video_updated_in_stage2 = False
+        for video_obj in videos_to_process_queue:
+            if _process_video_metadata_and_thumbnail(db, video_obj, current_thumbnails_storage_path):
+                any_video_updated_in_stage2 = True
+        if any_video_updated_in_stage2:
+            try:
+                db.commit()
+                print(f"[Scanner] 部分或全部视频的元数据/缩略图信息已更新并保存。")
+            except Exception as e:
+                db.rollback()
+                print(f"[Scanner] 保存元数据/缩略图更新失败: {e}")
+    
+    total_videos_in_db = db.query(func.count(models.Video.id)).scalar() or 0
+    print(f"[Scanner] 视频库扫描和处理全部完成。数据库中总视频数: {total_videos_in_db}")
+    return {"message": "视频库扫描完成", "total_videos_in_db": total_videos_in_db}

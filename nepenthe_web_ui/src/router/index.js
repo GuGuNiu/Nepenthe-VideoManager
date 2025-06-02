@@ -1,10 +1,12 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
 import VideoListView from '../views/VideoListView.vue';
+import SettingsView from '../views/SettingsView.vue';
 
 const routes = [
   { path: '/', name: 'VideoList', component: VideoListView, alias: '/home' },
   { path: '/featured', name: 'FeaturedVideos', component: VideoListView, props: { initialMinRating: 4.0 } },
   { path: '/gallery', name: 'GalleryView', component: VideoListView, meta: { disabled: true }, beforeEnter: (to, from, next) => { console.log('[路由守卫] 图集页面导航被阻止'); next(false); } },
+  { path: '/settings', name: 'Settings', component: SettingsView }, 
 ];
 
 const router = createRouter({

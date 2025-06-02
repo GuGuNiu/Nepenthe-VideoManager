@@ -1,4 +1,3 @@
-# components/launcher_ui.py
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -129,7 +128,7 @@ class UIManager:
             self.elements["logs_textbox"].configure(state="disabled")
             self.elements["logs_textbox"].see("end")
         else:
-            print(f"[UIManager Log Direct] {message}") # Fallback if textbox not ready
+            print(f"[UIManager Log Direct] {message}") 
 
     def update_status_display(self, status_text):
         self.status_var.set(status_text)

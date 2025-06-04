@@ -8,3 +8,4 @@
 /nepenthe_web_ui/dist_electron
 /build
 *.spec
+/nepenthe_web_ui/dev_backend

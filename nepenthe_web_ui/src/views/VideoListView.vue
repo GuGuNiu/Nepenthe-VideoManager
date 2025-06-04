@@ -62,6 +62,7 @@
               </div>
               <div class="bili-card-info">
                 <h3 class="bili-card-title" :title="video.name">{{ video.name }}</h3>
+                
                 <div class="bili-card-tags-persons">
                   <el-tag v-for="person in video.persons" :key="person.id" type="warning" size="small"
                     class="info-tag person-tag" @click.stop="addPersonToSearch(person.name)">
@@ -72,14 +73,26 @@
                   <el-tag v-for="tag in video.tags" :key="tag.id" size="small" class="info-tag"
                     @click.stop="addTagToSearch(tag.name)">{{ tag.name }}</el-tag>
                 </div>
+
+           <div class="bili-card-line-rating-studio">
                 <div class="bili-card-rating"
                   v-if="video.rating !== null && video.rating !== undefined && video.rating >= 0">
-                  <span>评分: {{ video.rating.toFixed(1) }} / 5</span>
+                  <span>评分: {{ video.rating.toFixed(1) }}</span>
                 </div>
+                <div class="bili-card-rating-placeholder" v-else>
+                  <span>评分: N/A</span>
+                </div>
+                  <div class="rating-studio-spacer"></div>
+                   <span v-if="video.studio" class="studio-text-display"> 
+                    {{ video.studio }}
+                  </span>
+                </div>
+
                 <div class="bili-card-meta">
                   <span class="meta-item view-count">播放: {{ video.view_count || 0 }}</span>
                   <span class="meta-item added-date">{{ formatRelativeDate(video.added_date) }}</span>
                 </div>
+                
                 <div class="bili-card-actions">
                   <el-dropdown @command="handleCardCommand" trigger="click" @click.stop>
                     <el-button :icon="MoreFilledIcon" circle class="bili-action-more-btn" @click.stop></el-button>
@@ -570,12 +583,11 @@
   }
 
   .bili-video-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 24px 16px;
-    padding: 0 20px;
+  display: grid;
+  gap: 16px; 
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
   }
-
+  
   .bili-video-card {
     background-color: transparent;
     cursor: pointer;
@@ -676,6 +688,46 @@
     margin-right: 2px;
   }
 
+.bili-card-line-rating-studio {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start; /* 整体还是从左开始，但内部元素会通过 spacer 分布 */
+  /* gap: 8px; */ /* 移除 gap，因为 spacer 会处理空间 */
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #606266; 
+}
+.bili-card-rating {
+  /* 评分特定样式 */
+  flex-shrink: 0; /* 防止评分被压缩 */
+}
+.bili-card-rating-placeholder { 
+  flex-shrink: 0; /* 防止占位符被压缩 */
+}
+.rating-studio-spacer {
+  flex-grow: 1; /* 这个元素会占据所有可用空间，将拍摄公司推到右边 */
+}
+.studio-text-display {
+  background-color: transparent; 
+  border: none;                
+  padding: 0;                
+  margin: 0;                 
+  font-size: inherit;          
+  color: inherit;              
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px; /* 你可以调整这个最大宽度 */
+  text-align: right; /* 确保文本本身在容器内也靠右（如果 max-width 生效） */
+  flex-shrink: 0; /* 防止拍摄公司文本被压缩 */
+}
+.bili-card-meta { /* 播放次数和时间那一行 */
+  display: flex;
+  justify-content: space-between; 
+  align-items: center;
+  font-size: 12px;
+  color: #909399; 
+}
   .bili-card-rating {
     margin-bottom: 10px;
     font-size: 12px;

@@ -1,20 +1,20 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, session, dialog } from 'electron';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import fs from 'node:fs';
-import url from 'node:url';
-import Store from 'electron-store';
-import { spawn } from 'node:child_process';
-import net from 'node:net';
+import { app, BrowserWindow, ipcMain, shell, Menu, session, dialog } from "electron";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import url from "node:url";
+import Store from "electron-store";
+import { spawn, execSync } from "node:child_process";
+import net from "node:net";
 
 const defaultConfig = {
-  apiHost: '127.0.0.1',
+  apiHost: "127.0.0.1",
   apiPort: 8000,
-  internalApiHost: '127.0.0.1',
+  internalApiHost: "127.0.0.1",
   internalApiPort: 28000,
   videoPaths: [],
-  ffmpegPath: '',
-  ffprobePath: '',
+  ffmpegPath: "",
+  ffprobePath: "",
   windowWidth: 1600,
   windowHeight: 900,
   windowX: undefined,
@@ -23,7 +23,6 @@ const defaultConfig = {
 const store = new Store({ defaults: defaultConfig });
 
 let dataDirRootForApp;
-let dataDirRoot;
 let dbFilePath;
 let thumbnailsStoragePath;
 
@@ -31,9 +30,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const cliArgs = process.argv.slice(1);
-const isServeMode = cliArgs.includes('--serve') && !app.isPackaged;
+const isServeMode = cliArgs.includes("--serve") && !app.isPackaged;
 let viteServePort = 5174;
-const portArgIndexCLI = cliArgs.indexOf('--port');
+const portArgIndexCLI = cliArgs.indexOf("--port");
 if (portArgIndexCLI !== -1 && cliArgs[portArgIndexCLI + 1]) {
   const parsedPort = parseInt(cliArgs[portArgIndexCLI + 1], 10);
   if (!isNaN(parsedPort)) {
@@ -43,287 +42,456 @@ if (portArgIndexCLI !== -1 && cliArgs[portArgIndexCLI + 1]) {
 
 let mainWindow;
 let pythonBackendProcess = null;
+let backendJustClosedManually = false;
+let backendApiUrl = "";
 
-// electron/main.js - 确保 initializeEssentialPaths 函数是这样的：
+function logToConsole(level, ...args) {
+  const message = args.map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg))).join(" ");
+  const timestamp = new Date().toISOString();
+  console[level](`[${timestamp}] [MainProcess-${level.toUpperCase()}] ${message}`);
+}
 
 function initializeEssentialPaths() {
   try {
-    // electron-store 的配置文件仍然会使用 app.getPath('userData') 下的默认位置或你指定的 cwd
-    // 但我们的核心数据 (db, thumbnails) 将根据下面的逻辑确定路径
-
     if (app.isPackaged) {
-      // 打包模式：数据存储在 .exe 所在目录的 "data" 文件夹下
-      dataDirRootForApp = path.join(path.dirname(app.getPath('exe')), 'data');
-      console.log(`[MainProcess] Packaged mode. App data root (for DB/Thumbnails) set to: ${dataDirRootForApp}`);
+      dataDirRootForApp = path.join(path.dirname(app.getPath("exe")), "data");
+      logToConsole("info", `Packaged mode. App data root set to: ${dataDirRootForApp}`);
     } else {
-      // 开发模式：数据存储在项目根目录 (Nepenthe-VideoManager) 的 "data" 文件夹下
-      // app.getAppPath() 在开发时是 nepenthe_web_ui 目录 (Electron 项目的根)
-      // 我们需要找到 Nepenthe-VideoManager 这个 Python 项目的根目录
-      // 假设 nepenthe_web_ui 和 Nepenthe-VideoManager 是同级目录：
-      // const mainProjectRootDev = path.resolve(app.getAppPath(), '..', 'Nepenthe-VideoManager');
-      // 或者，如果你的 Python 项目就是 nepenthe_web_ui 的上一级：
-      const mainProjectRootDev = path.resolve(app.getAppPath(), '..'); 
-      dataDirRootForApp = path.join(mainProjectRootDev, 'data');
-      console.log(`[MainProcess] Development mode. App data root (for DB/Thumbnails) set to: ${dataDirRootForApp}`);
+      const mainProjectRootDev = path.resolve(app.getAppPath(), "..");
+      dataDirRootForApp = path.join(mainProjectRootDev, "data");
+      logToConsole("info", `Development mode. App data root set to: ${dataDirRootForApp}`);
     }
-
     if (!fs.existsSync(dataDirRootForApp)) {
-        fs.mkdirSync(dataDirRootForApp, { recursive: true });
-        console.log(`[MainProcess] Successfully created app data directory: ${dataDirRootForApp}`);
-    } else {
-        console.log(`[MainProcess] App data directory already exists: ${dataDirRootForApp}`);
+      fs.mkdirSync(dataDirRootForApp, { recursive: true });
     }
-
-    const dbFileNameInternal = 'nepenthe_videos.db';
-    dbFilePath = path.join(dataDirRootForApp, dbFileNameInternal); // Python后端将使用这个路径
-    const thumbnailsDirNameInternal = 'thumbnails';
-    thumbnailsStoragePath = path.join(dataDirRootForApp, thumbnailsDirNameInternal); // Python后端将使用这个路径
+    dbFilePath = path.join(dataDirRootForApp, "nepenthe_videos.db");
+    thumbnailsStoragePath = path.join(dataDirRootForApp, "thumbnails");
     if (!fs.existsSync(thumbnailsStoragePath)) {
-        fs.mkdirSync(thumbnailsStoragePath, { recursive: true });
-        console.log(`[MainProcess] Successfully created thumbnails directory: ${thumbnailsStoragePath}`);
-    } else {
-        console.log(`[MainProcess] Thumbnails directory already exists: ${thumbnailsStoragePath}`);
+      fs.mkdirSync(thumbnailsStoragePath, { recursive: true });
     }
-    
-    console.log(`[MainProcess] Database file for backend will be at: ${dbFilePath}`);
-    console.log(`[MainProcess] Thumbnails for backend will be stored at: ${thumbnailsStoragePath}`);
+    logToConsole("info", `DB file path: ${dbFilePath}`);
+    logToConsole("info", `Thumbnails storage path: ${thumbnailsStoragePath}`);
     return true;
   } catch (error) {
-    console.error(`[MainProcess] FATAL ERROR: Could not initialize app data paths. Error: ${error}`);
+    logToConsole("error", `FATAL ERROR initializing app data paths: ${error.message}`, error.stack);
     dialog.showErrorBox("Data Path Error", `Failed to initialize application data paths.\nError: ${error.message}`);
-    app.quit(); // 确保在致命错误时退出
+    app.quit();
     return false;
   }
 }
 
 function getPythonBackendExePath() {
-  const backendExecutableName = process.platform === 'win32' ? 'nepenthe_backend.exe' : 'nepenthe_backend';
+  const backendExecutableName = process.platform === "win32" ? "nepenthe_backend.exe" : "nepenthe_backend";
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'assets', 'backend', backendExecutableName);
+    return path.join(process.resourcesPath, "assets", "backend", backendExecutableName);
   } else {
-    return path.resolve(app.getAppPath(), 'dev_backend', 'nepenthe_backend', backendExecutableName);
+    return path.resolve(app.getAppPath(), "dev_backend", "nepenthe_backend", backendExecutableName);
   }
 }
 
 async function findFreePort(startPort = 28000) {
-    return new Promise((resolve, reject) => {
-        const server = net.createServer();
-        server.listen(startPort, '127.0.0.1', () => {
-            const port = server.address().port;
-            server.close(() => resolve(port));
-        });
-        server.on('error', (err) => {
-            if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
-                resolve(findFreePort(startPort + 1));
-            } else {
-                reject(err);
-            }
-        });
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(startPort, "127.0.0.1", () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
     });
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE" || err.code === "EACCES") {
+        resolve(findFreePort(startPort + 1));
+      } else {
+        reject(err);
+      }
+    });
+  });
 }
 
 async function startPythonBackend() {
   if (pythonBackendProcess && pythonBackendProcess.pid && !pythonBackendProcess.killed) {
-    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', '[INFO][MainProc] Python backend is already running.');
-    return store.get('internalApiPort'); 
+    logToConsole("warn", `Python backend (PID: ${pythonBackendProcess.pid}) is already running.`);
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed() && backendApiUrl) {
+      mainWindow.webContents.send("backend-status-update", { status: "running", apiUrl: backendApiUrl });
+    }
+    return store.get("internalApiPort");
   }
 
   const backendExePath = getPythonBackendExePath();
   if (!backendExePath || !fs.existsSync(backendExePath)) {
-    const errorMsg = `Python backend executable not found at: ${backendExePath || 'path not determined'}`;
-    console.error(`[MainProcess] ${errorMsg}`);
-    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', `[ERROR][MainProc] ${errorMsg}`);
+    const errorMsg = `Python backend executable not found at: ${backendExePath || "path not determined"}`;
+    logToConsole("error", errorMsg);
+    dialog.showErrorBox("Backend Error", errorMsg);
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed())
+      mainWindow.webContents.send("backend-status-update", { status: "error", message: "Backend executable not found" });
     return null;
   }
 
-  const apiHostForBackend = '127.0.0.1';
+  const apiHostForBackend = "127.0.0.1";
   let actualApiPortForBackend;
   try {
-    actualApiPortForBackend = await findFreePort(store.get('internalApiPort', defaultConfig.internalApiPort));
+    actualApiPortForBackend = await findFreePort(store.get("internalApiPort", defaultConfig.internalApiPort));
   } catch (portError) {
-    console.error('[MainProcess] Could not find a free port for the backend:', portError);
-    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', `[ERROR][MainProc] Could not find a free port for the backend: ${portError.message}`);
+    logToConsole("error", "Could not find a free port for the backend:", portError.message);
+    dialog.showErrorBox("Backend Port Error", `Could not find an available port for the backend.\n${portError.message}`);
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed())
+      mainWindow.webContents.send("backend-status-update", { status: "error", message: "No available port for backend" });
     return null;
   }
-  
-  store.set('internalApiHost', apiHostForBackend); 
-  store.set('internalApiPort', actualApiPortForBackend); 
 
-  const videoPathsFromStore = store.get('videoPaths', []);
-  const ffmpegPathFromStore = store.get('ffmpegPath', '');
-  const ffprobePathFromStore = store.get('ffprobePath', '');
+  store.set("internalApiHost", apiHostForBackend);
+  store.set("internalApiPort", actualApiPortForBackend);
+  backendApiUrl = `http://${apiHostForBackend}:${actualApiPortForBackend}`;
 
-  const backendArgs = [
-    '--host', apiHostForBackend,
-    '--port', actualApiPortForBackend.toString(),
-    '--video_paths', videoPathsFromStore.join(','),
-    '--db-file-path', dbFilePath,
-    '--thumbnails-storage-path', thumbnailsStoragePath,
-  ];
-  if (ffmpegPathFromStore) backendArgs.push('--ffmpeg-path', ffmpegPathFromStore);
-  if (ffprobePathFromStore) backendArgs.push('--ffprobe-path', ffprobePathFromStore);
+  const videoPathsFromStore = store.get("videoPaths", []);
+  const ffmpegPathFromStore = store.get("ffmpegPath", "");
+  const ffprobePathFromStore = store.get("ffprobePath", "");
 
-  if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', `[INFO][MainProc] Starting Python backend (Host: ${apiHostForBackend}, Port: ${actualApiPortForBackend})...`);
-  console.log(`[MainProcess] Attempting to start Python backend: ${backendExePath} with args: ${backendArgs.join(' ')}`);
-  
+  const backendArgs = ["--host", apiHostForBackend, "--port", actualApiPortForBackend.toString(), "--db-file-path", dbFilePath, "--thumbnails-storage-path", thumbnailsStoragePath];
+  if (videoPathsFromStore && videoPathsFromStore.length > 0) backendArgs.push("--video_paths", videoPathsFromStore.join(","));
+  if (ffmpegPathFromStore) backendArgs.push("--ffmpeg-path", ffmpegPathFromStore);
+  if (ffprobePathFromStore) backendArgs.push("--ffprobe-path", ffprobePathFromStore);
+
+  logToConsole("info", `Starting Python backend: ${backendExePath} with args: ${backendArgs.join(" ")}`);
+  if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send("backend-status-update", { status: "starting", apiUrl: backendApiUrl });
+  }
+
   try {
     const backendWorkingDirectory = path.dirname(backendExePath);
-    pythonBackendProcess = spawn(backendExePath, backendArgs, { 
-        stdio: ['ignore', 'pipe', 'pipe'], // stdin, stdout, stderr
-        cwd: backendWorkingDirectory,
-        windowsHide: true 
+    pythonBackendProcess = spawn(backendExePath, backendArgs, {
+      stdio: "ignore",
+      cwd: backendWorkingDirectory,
+      windowsHide: true,
     });
 
-    pythonBackendProcess.stdout.on('data', (data) => {
-      const message = data.toString().trim();
-      console.log(`[MainProcess FORWARDING STDOUT] ${message}`); // 主进程日志，确认收到
-      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-        mainWindow.webContents.send('backend-log-message', `[stdout] ${message}`);
-      }
-    });
-    pythonBackendProcess.stderr.on('data', (data) => {
-      const message = data.toString().trim();
-      console.error(`[MainProcess FORWARDING STDERR] ${message}`); // 主进程日志，确认收到
-      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-        mainWindow.webContents.send('backend-log-message', `[stderr] ${message}`);
-      }
-    });
-    pythonBackendProcess.on('error', (err) => {
-      console.error('[MainProcess] Failed to start Python backend process (spawn error):', err);
-      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', `[ERROR][MainProc] Failed to start Python backend: ${err.message}`);
+    if (!pythonBackendProcess || !pythonBackendProcess.pid) {
+      throw new Error("Failed to spawn backend process (process or PID is null).");
+    }
+    backendJustClosedManually = false;
+
+    pythonBackendProcess.on("error", (err) => {
+      logToConsole("error", `Failed to start Python backend process (spawn error): ${err.message}`, err.stack);
+      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed())
+        mainWindow.webContents.send("backend-status-update", { status: "error", message: `Failed to start Python backend: ${err.message}` });
       pythonBackendProcess = null;
     });
-    pythonBackendProcess.on('close', (code) => {
-      console.log(`[MainProcess] Python backend process closed with code ${code}`);
-      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', `[INFO][MainProc] Python backend process exited with code ${code}.`);
+    pythonBackendProcess.on("close", (code, signal) => {
+      const pidForLog = pythonBackendProcess ? pythonBackendProcess.pid : "N/A (already null)";
+      if (!backendJustClosedManually) {
+        logToConsole("warn", `Python backend process (PID: ${pidForLog}) closed unexpectedly or finished. Code: ${code}, Signal: ${signal}`);
+        if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+          mainWindow.webContents.send("backend-status-update", { status: "stopped", message: `Backend process exited with code ${code}.` });
+        }
+      } else {
+        logToConsole("info", `Python backend process (PID: ${pidForLog}) closed after manual termination. Code: ${code}, Signal: ${signal}`);
+      }
       pythonBackendProcess = null;
+      backendApiUrl = "";
     });
-    console.log(`[MainProcess] Python backend process object created (PID: ${pythonBackendProcess.pid}), should listen on ${apiHostForBackend}:${actualApiPortForBackend}`);
+    logToConsole("info", `Python backend process spawned (PID: ${pythonBackendProcess.pid}), should listen on ${backendApiUrl}`);
+
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      setTimeout(() => {
+        if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed() && pythonBackendProcess && !pythonBackendProcess.killed) {
+          mainWindow.webContents.send("backend-status-update", { status: "running", apiUrl: backendApiUrl });
+        }
+      }, 2000);
+    }
     return actualApiPortForBackend;
   } catch (spawnError) {
-    console.error('[MainProcess] Exception while spawning Python backend process:', spawnError);
-    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', `[ERROR][MainProc] Error spawning Python backend: ${spawnError.message}`);
+    logToConsole("error", "Exception while spawning Python backend process:", spawnError.message, spawnError.stack);
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed())
+      mainWindow.webContents.send("backend-status-update", { status: "error", message: `Error spawning Python backend: ${spawnError.message}` });
     pythonBackendProcess = null;
     return null;
   }
+}
+
+async function stopPythonBackend() {
+  return new Promise((resolve) => {
+    if (!pythonBackendProcess || pythonBackendProcess.killed) {
+      logToConsole("info", "Backend process is not running or already killed.");
+      if (pythonBackendProcess) pythonBackendProcess = null;
+      resolve();
+      return;
+    }
+    const pid = pythonBackendProcess.pid;
+    logToConsole("info", `Attempting to stop backend process (PID: ${pid})...`);
+    backendJustClosedManually = true;
+    let resolved = false;
+    const resolveOnce = () => {
+      if (!resolved) {
+        resolved = true;
+        pythonBackendProcess = null;
+        backendApiUrl = "";
+        resolve();
+      }
+    };
+    const killTimeout = setTimeout(() => {
+      logToConsole("warn", `Backend process (PID: ${pid}) did not exit within timeout. Forcing kill.`);
+      if (pythonBackendProcess && !pythonBackendProcess.killed) {
+        if (process.platform === "win32") {
+          try {
+            execSync(`taskkill /PID ${pid} /F /T`, { stdio: "ignore" });
+            logToConsole("info", `Forced kill (taskkill /F /T) command issued for PID ${pid}.`);
+          } catch (e_force) {
+            let forceKillErrorMessage = `Forced taskkill for PID ${pid} failed.`;
+            if (e_force.status) {
+              forceKillErrorMessage += ` Exit status: ${e_force.status}.`;
+            }
+            if (e_force.status === 128) {
+              forceKillErrorMessage += " Reason: Process not found (it may have already exited).";
+            } else if (e_force.status === 1) {
+              forceKillErrorMessage += " Reason: Operation failed (e.g., access denied or process cannot be terminated).";
+            } else if (e_force.status !== null && e_force.status !== undefined) {
+              forceKillErrorMessage += " Reason: taskkill command failed with a non-zero exit code.";
+            } else {
+              forceKillErrorMessage += ` execSync error: ${e_force.message}`;
+            }
+            logToConsole("error", forceKillErrorMessage);
+          }
+        } else {
+          pythonBackendProcess.kill("SIGKILL");
+          logToConsole("info", `Sent SIGKILL to PID ${pid}.`);
+        }
+      }
+      resolveOnce();
+    }, 7000);
+    pythonBackendProcess.once("close", (code, signal) => {
+      clearTimeout(killTimeout);
+      logToConsole("info", `Backend process (PID: ${pid}) confirmed exit. Code: ${code}, Signal: ${signal}.`);
+      resolveOnce();
+    });
+    if (process.platform === "win32") {
+      try {
+        execSync(`taskkill /PID ${pid} /T`, { stdio: "ignore" });
+        logToConsole("info", `Gentle taskkill (/T) command issued for PID ${pid}. Waiting for process to close.`);
+      } catch (e) {
+        let gentleKillErrorMessage = `Gentle taskkill (/T) for PID ${pid} failed.`;
+        if (e.status) {
+          gentleKillErrorMessage += ` Exit status: ${e.status}.`;
+        }
+        if (e.status === 128) {
+          gentleKillErrorMessage += " Reason: Process could not be terminated gracefully (e.g., child processes running or process not found).";
+        } else if (e.status === 1) {
+          gentleKillErrorMessage += " Reason: Operation failed (e.g., access denied).";
+        } else if (e.status !== null && e.status !== undefined) {
+          gentleKillErrorMessage += " Reason: taskkill command failed with a non-zero exit code.";
+        } else {
+          gentleKillErrorMessage += ` execSync error: ${e.message}`;
+        }
+        logToConsole("warn", gentleKillErrorMessage);
+      }
+    } else {
+      const success = pythonBackendProcess.kill("SIGTERM");
+      if (success) {
+        logToConsole("info", `Sent SIGTERM to PID ${pid}. Waiting for process to close.`);
+      } else {
+        logToConsole("warn", `Failed to send SIGTERM to PID ${pid} (process might have already exited).`);
+        clearTimeout(killTimeout);
+        resolveOnce();
+      }
+    }
+  });
 }
 
 async function createWindow() {
-  const preloadScriptPath = path.join(__dirname, 'preload.js');
+  const preloadScriptPath = path.join(__dirname, "preload.js");
   if (!fs.existsSync(preloadScriptPath)) {
-    console.error('[MainProcess] FATAL ERROR: Preload script not found at:', preloadScriptPath);
-    app.quit(); return;
+    logToConsole("error", "FATAL ERROR: Preload script not found at:", preloadScriptPath);
+    app.quit();
+    return;
   }
-
   mainWindow = new BrowserWindow({
-    width: store.get('windowWidth'), height: store.get('windowHeight'),
-    minWidth: 1000, minHeight: 600,
-    x: store.get('windowX'), y: store.get('windowY'),
+    width: store.get("windowWidth"),
+    height: store.get("windowHeight"),
+    minWidth: 1000,
+    minHeight: 600,
+    x: store.get("windowX"),
+    y: store.get("windowY"),
     webPreferences: { preload: preloadScriptPath, contextIsolation: true, nodeIntegration: false, devTools: isServeMode },
-    icon: path.join(__dirname, '../public/fac.ico')
+    icon: path.join(__dirname, "../public/fac.ico"),
   });
-
-  mainWindow.on('resized', () => { if(mainWindow && !mainWindow.isMinimized() && !mainWindow.isMaximized()){ const [width, height] = mainWindow.getSize(); store.set('windowWidth', width); store.set('windowHeight', height);}});
-  mainWindow.on('moved', () => { if(mainWindow && !mainWindow.isMinimized() && !mainWindow.isMaximized()){ const [x, y] = mainWindow.getPosition(); store.set('windowX', x); store.set('windowY', y);}});
-  const winX = store.get('windowX'); const winY = store.get('windowY');
-  if (typeof winX === 'number' && typeof winY === 'number') mainWindow.setPosition(winX, winY);
-  
+  mainWindow.on("resized", () => {
+    if (mainWindow && !mainWindow.isMinimized() && !mainWindow.isMaximized()) {
+      const [width, height] = mainWindow.getSize();
+      store.set("windowWidth", width);
+      store.set("windowHeight", height);
+    }
+  });
+  mainWindow.on("moved", () => {
+    if (mainWindow && !mainWindow.isMinimized() && !mainWindow.isMaximized()) {
+      const [x, y] = mainWindow.getPosition();
+      store.set("windowX", x);
+      store.set("windowY", y);
+    }
+  });
+  const winX = store.get("windowX");
+  const winY = store.get("windowY");
+  if (typeof winX === "number" && typeof winY === "number") mainWindow.setPosition(winX, winY);
   Menu.setApplicationMenu(null);
-
-  let apiHostForFrontend = store.get('internalApiHost');
-  let apiPortForFrontend = store.get('internalApiPort');
-
   const backendPort = await startPythonBackend();
-  if (backendPort) {
-      apiHostForFrontend = store.get('internalApiHost');
-      apiPortForFrontend = store.get('internalApiPort');
-  } else {
-      console.error("[MainProcess] CRITICAL: Python backend failed to start or returned invalid port.");
-      if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('backend-log-message', `[ERROR][MainProc] Python backend failed to start. Please check main process logs.`);
-      // Fallback to stored general API settings if internal backend fails
-      apiHostForFrontend = store.get('apiHost', defaultConfig.apiHost);
-      apiPortForFrontend = store.get('apiPort', defaultConfig.apiPort);
-      console.warn(`[MainProcess] Falling back to general API config: http://${apiHostForFrontend}:${apiPortForFrontend}`);
+  let apiHostForFrontend = store.get("internalApiHost");
+  let apiPortForFrontend = store.get("internalApiPort");
+  if (!backendPort) {
+    logToConsole("error", "CRITICAL: Python backend failed to start. Frontend might not work correctly.");
+    apiHostForFrontend = store.get("apiHost", defaultConfig.apiHost);
+    apiPortForFrontend = store.get("apiPort", defaultConfig.apiPort);
+    logToConsole("warn", `Falling back to general API config for frontend: http://${apiHostForFrontend}:${apiPortForFrontend}`);
+    dialog.showErrorBox("Backend Failed", "The backend service could not be started. Please check logs or restart the application.");
   }
-  
   const dynamicApiOrigin = `http://${apiHostForFrontend}:${apiPortForFrontend}`;
-  console.log("[MainProcess] API Origin for CSP and Preload:", dynamicApiOrigin);
-
+  logToConsole("info", "API Origin for CSP and Preload:", dynamicApiOrigin);
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const cspDirectives = [
-      `default-src 'self' http://localhost:${viteServePort}`, 
-      `script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:${viteServePort}`, 
-      `style-src 'self' 'unsafe-inline'`, 
-      `img-src 'self' data: http://localhost:${viteServePort} ${dynamicApiOrigin}`, 
-      `font-src 'self' data: http://localhost:${viteServePort}`, 
-      `connect-src 'self' http://localhost:${viteServePort} ${dynamicApiOrigin}`, 
-      `media-src 'self' http://localhost:${viteServePort} ${dynamicApiOrigin}`,
-      `object-src 'none'`, `frame-src 'none'`  
+      `default-src 'self' http://localhost:${viteServePort}`,
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:${viteServePort}`,
+      `style-src 'self' 'unsafe-inline'`,
+      `img-src 'self' data: blob: http://localhost:${viteServePort} ${dynamicApiOrigin}`,
+      `font-src 'self' data: http://localhost:${viteServePort}`,
+      `connect-src 'self' http://localhost:${viteServePort} ${dynamicApiOrigin} ws://localhost:${viteServePort}`,
+      `media-src 'self' data: blob: http://localhost:${viteServePort} ${dynamicApiOrigin}`,
+      `object-src 'none'`,
+      `frame-src 'none'`,
     ];
-    const cspString = cspDirectives.map(d => d.trim().endsWith(';') ? d.trim() : d.trim() + ';').join(' ');
-    callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [cspString] } });
+    const cspString = cspDirectives.map((d) => (d.trim().endsWith(";") ? d.trim() : d.trim() + ";")).join(" ");
+    callback({ responseHeaders: { ...details.responseHeaders, "Content-Security-Policy": [cspString] } });
   });
-
   if (isServeMode) {
     const devUrl = `http://localhost:${viteServePort}`;
-    mainWindow.loadURL(devUrl)
-      .then(() => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.focus(); if (!mainWindow.webContents.isDevToolsOpened()) mainWindow.webContents.openDevTools(); }})
-      .catch(err => console.error(`[MainProcess] Failed to load dev URL ${devUrl}:`, err));
-  } else { 
-    const indexHtmlPath = path.join(__dirname, '../dist/index.html');
-    const indexPath = url.format({ pathname: indexHtmlPath, protocol: 'file:', slashes: true, });
-    if (!fs.existsSync(indexHtmlPath) && app.isPackaged) {
-      console.error('[MainProcess] ERROR: dist/index.html not found:', indexHtmlPath);
+    mainWindow
+      .loadURL(devUrl)
+      .then(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.focus();
+          if (!mainWindow.webContents.isDevToolsOpened()) mainWindow.webContents.openDevTools({ mode: "detach" });
+        }
+      })
+      .catch((err) => logToConsole("error", `Failed to load dev URL ${devUrl}: ${err.message}`, err.stack));
+  } else {
+    const indexHtmlPath = path.join(__dirname, "../dist/index.html");
+    const indexPath = url.format({ pathname: indexHtmlPath, protocol: "file:", slashes: true });
+    if (!fs.existsSync(indexHtmlPath)) {
+      logToConsole("error", "ERROR: Production build (dist/index.html) not found at:", indexHtmlPath);
+      dialog.showErrorBox("Application Error", "The application files (index.html) could not be found.");
+      app.quit();
+      return;
     }
-    mainWindow.loadURL(indexPath)
-      .then(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus(); })
-      .catch(err => console.error(`[MainProcess] Failed to load production file ${indexPath}:`, err));
+    mainWindow
+      .loadURL(indexPath)
+      .then(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+      })
+      .catch((err) => logToConsole("error", `Failed to load production file ${indexPath}: ${err.message}`, err.stack));
   }
-  mainWindow.webContents.on('devtools-closed', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.focus(); setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus(); }, 100);}});
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.webContents.on("devtools-closed", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.focus();
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+      }, 100);
+    }
+  });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
-ipcMain.handle('get-all-configs', () => {
+ipcMain.handle("get-all-configs", () => {
   return {
-    apiHost: store.get('internalApiHost'), 
-    apiPort: store.get('internalApiPort'),
-    videoPaths: store.get('videoPaths'),
-    ffmpegPath: store.get('ffmpegPath'), 
-    ffprobePath: store.get('ffprobePath'),
-    isPackaged: app.isPackaged, 
-    dataDir: dataDirRoot 
+    apiHost: store.get("internalApiHost", defaultConfig.internalApiHost),
+    apiPort: store.get("internalApiPort", defaultConfig.internalApiPort),
+    videoPaths: store.get("videoPaths", defaultConfig.videoPaths),
+    ffmpegPath: store.get("ffmpegPath", defaultConfig.ffmpegPath),
+    ffprobePath: store.get("ffprobePath", defaultConfig.ffprobePath),
+    isPackaged: app.isPackaged,
   };
 });
-ipcMain.handle('get-config', (event, key) => store.get(key));
-ipcMain.handle('set-config', (event, key, value) => { try { store.set(key, value); return { success: true }; } catch (error) { console.error(`[MainProcess] Failed to set config: ${key}`, error); return { success: false, error: error.message };}});
-ipcMain.handle('get-platform', () => process.platform);
-ipcMain.handle('browse-directory', async () => { const tWin = BrowserWindow.getFocusedWindow()||mainWindow; if(!tWin||tWin.isDestroyed())return null; const r = await dialog.showOpenDialog(tWin,{properties:['openDirectory']}); if(!r.canceled&&r.filePaths.length>0)return r.filePaths[0]; return null;});
-ipcMain.handle('browse-file', async (event, options) => { const tWin = BrowserWindow.getFocusedWindow()||mainWindow; if(!tWin||tWin.isDestroyed())return null; const o={properties:['openFile'],title:options?.title||'选择文件',filters:options?.filters||[{name:'所有文件',extensions:['*']}]}; const r=await dialog.showOpenDialog(tWin,o); if(!r.canceled&&r.filePaths.length>0)return r.filePaths[0]; return null;});
-ipcMain.on('play-video-locally', (event, videoPath) => { if(videoPath&&typeof videoPath==='string'){shell.openPath(videoPath).catch(err=>console.error(`IPC err: ${err}`));}else{console.error('IPC invalid videoPath');}});
-ipcMain.on('show-item-in-folder', (event, itemPath) => { if(itemPath&&typeof itemPath==='string'){shell.showItemInFolder(itemPath);}else{console.error('IPC invalid itemPath');}});
-ipcMain.on('open-external-link', (event, extUrl) => { if (extUrl && (extUrl.startsWith('http:') || extUrl.startsWith('https:'))) { shell.openExternal(extUrl); }});
-ipcMain.handle('get-app-version', () => app.getVersion());
-ipcMain.handle('check-initial-config-status', () => ({ needsSetup: !(store.get('videoPaths', [])).length }));
-ipcMain.handle('start-python-backend-manual', async () => { 
-    const port = await startPythonBackend();
-    return { success: !!port, port: port, host: store.get('internalApiHost') };
+ipcMain.handle("get-config", (event, key) => store.get(key));
+ipcMain.handle("set-config", (event, key, value) => {
+  try {
+    store.set(key, value);
+    logToConsole("info", `Config set: ${key} = ${JSON.stringify(value)}`);
+    return { success: true };
+  } catch (error) {
+    logToConsole("error", `Failed to set config: ${key}`, error.message, error.stack);
+    return { success: false, error: error.message };
+  }
+});
+ipcMain.handle("get-platform", () => process.platform);
+ipcMain.handle("browse-directory", async () => {
+  const tWin = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!tWin || tWin.isDestroyed()) return null;
+  const r = await dialog.showOpenDialog(tWin, { properties: ["openDirectory"] });
+  if (!r.canceled && r.filePaths.length > 0) return r.filePaths[0];
+  return null;
+});
+ipcMain.handle("browse-file", async (event, options) => {
+  const tWin = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!tWin || tWin.isDestroyed()) return null;
+  const o = { properties: ["openFile"], title: options?.title || "选择文件", filters: options?.filters || [{ name: "所有文件", extensions: ["*"] }] };
+  const r = await dialog.showOpenDialog(tWin, o);
+  if (!r.canceled && r.filePaths.length > 0) return r.filePaths[0];
+  return null;
+});
+ipcMain.on("play-video-locally", (event, videoPath) => {
+  if (videoPath && typeof videoPath === "string") {
+    shell.openPath(videoPath).catch((err) => logToConsole("error", `IPC play-video-locally error: ${err.message}`));
+  } else {
+    logToConsole("error", "IPC play-video-locally: invalid videoPath");
+  }
+});
+ipcMain.on("show-item-in-folder", (event, itemPath) => {
+  if (itemPath && typeof itemPath === "string") {
+    shell.showItemInFolder(itemPath);
+  } else {
+    logToConsole("error", "IPC show-item-in-folder: invalid itemPath");
+  }
+});
+ipcMain.on("open-external-link", (event, extUrl) => {
+  if (extUrl && (extUrl.startsWith("http:") || extUrl.startsWith("https:"))) {
+    shell.openExternal(extUrl).catch((err) => logToConsole("error", `IPC open-external-link error: ${err.message}`));
+  }
+});
+ipcMain.handle("get-app-version", () => app.getVersion());
+ipcMain.handle("check-initial-config-status", () => ({ needsSetup: !store.get("videoPaths", []).length }));
+ipcMain.handle("start-python-backend-manual", async () => {
+  logToConsole("info", "IPC: Manual backend start requested.");
+  const port = await startPythonBackend();
+  return { success: !!port, port: port, host: store.get("internalApiHost") };
+});
+ipcMain.handle("stop-python-backend-manual", async () => {
+  logToConsole("info", "IPC: Manual backend stop requested.");
+  await stopPythonBackend();
+  return { success: true };
 });
 
-app.whenReady().then(async () => {
-  if (!initializeEssentialPaths()) {
-    return; 
-  }
-  await createWindow(); 
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-}).catch(err => console.error('[MainProcess] Error during app.whenReady:', err));
+app
+  .whenReady()
+  .then(async () => {
+    if (!initializeEssentialPaths()) {
+      logToConsole("error", "Failed to initialize essential paths. Application will quit.");
+      return;
+    }
+    await createWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  })
+  .catch((err) => logToConsole("error", "Error during app.whenReady:", err.message, err.stack));
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
 
-app.on('will-quit', () => {
-  if (pythonBackendProcess && !pythonBackendProcess.killed) {
-    console.log('[MainProcess] Attempting to terminate Python backend process before quit...');
-    const killed = pythonBackendProcess.kill('SIGTERM'); 
-    console.log(`[MainProcess] Python backend process kill signal sent, success: ${killed}`);
-    pythonBackendProcess = null;
+app.on("will-quit", async (event) => {
+  logToConsole("info", "'will-quit' event triggered. Preparing to stop backend...");
+  event.preventDefault();
+  try {
+    await stopPythonBackend();
+    logToConsole("info", "Backend stopped. Proceeding with app quit.");
+  } catch (error) {
+    logToConsole("error", "Error stopping backend during app quit:", error.message, error.stack);
+  } finally {
+    app.exit();
   }
 });

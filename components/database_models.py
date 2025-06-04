@@ -26,6 +26,8 @@ class Video(Base):
     thumbnail_path = Column(String, nullable=True)
     view_count = Column(Integer, default=0)
     rating = Column(Float, default=0.0, nullable=True) 
+    studio = Column(String, nullable=True, index=True)
+    
 
     tags = relationship("Tag", secondary=video_tags_table, back_populates="videos")
     persons = relationship("Person", secondary=video_persons_table, back_populates="videos")

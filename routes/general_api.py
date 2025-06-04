@@ -9,6 +9,7 @@ from components import database_models as models
 from tools.db_utils import get_db
 from components import video_scanner
 from config.backend_settings import settings
+from components import library_cleaner
 import threading
 import sys
 import os
@@ -41,7 +42,8 @@ class VideoBase(BaseModel):
     duration: Optional[int] = None; width: Optional[int] = None
     height: Optional[int] = None; thumbnail_path: Optional[str] = None
     added_date: Optional[datetime] = None
-    rating: Optional[float] = Field(None, ge=0, le=5) 
+    rating: Optional[float] = Field(None, ge=0, le=5)
+    studio: Optional[str] = Field(None, max_length=100)
     model_config = ConfigDict(from_attributes=True)
 
 class VideoResponseWithDetails(VideoBase):
@@ -55,11 +57,21 @@ class VideoUpdate(BaseModel):
     tags: Optional[List[str]] = Field(None)
     persons: Optional[List[str]] = Field(None)
     rating: Optional[float] = Field(None, ge=0, le=5) 
+    studio: Optional[str] = Field(None, max_length=100)
+
 class LibraryStatsResponse(BaseModel):
     total_videos: int
     total_size_bytes: Optional[int] = None 
     last_scan_time: Optional[datetime] = None
     # 你可以根据需要添加 model_config = ConfigDict(from_attributes=True) 如果需要从 ORM 对象转换
+
+class PathSyncRequest(BaseModel):
+    # previous_paths: List[str] # 不再需要 previous_paths，清理逻辑会对比当前配置和数据库
+    current_paths: List[str]
+
+class ScanRequest(BaseModel):
+    paths_to_scan: Optional[List[str]] = None # 允许前端传递路径列表
+
 
 @router.get("/")
 async def read_api_root(): return {"message": "欢迎使用忘忧露视频管理 API！ (API 根路径)"}
@@ -248,6 +260,15 @@ async def update_video_details(video_id: int, video_update_data: VideoUpdate, db
     if not db_video: raise HTTPException(status_code=404, detail="视频未找到")
     if video_update_data.name is not None: db_video.name = video_update_data.name
     if video_update_data.rating is not None: db_video.rating = video_update_data.rating 
+    if video_update_data.studio is not None: 
+        if db_video.studio != video_update_data.studio:
+            db_video.studio = video_update_data.studio
+            update_occurred = True
+            print(f"[API PUT /videos/{video_id}] Updating studio to: '{video_update_data.studio}'")
+    elif hasattr(video_update_data, 'studio') and video_update_data.studio is None and db_video.studio is not None:
+        db_video.studio = None 
+        update_occurred = True
+        print(f"[API PUT /videos/{video_id}] Clearing studio field (was: '{db_video.studio}').")
     if video_update_data.tags is not None:
         updated_video_tags = []
         if video_update_data.tags: 
@@ -285,35 +306,97 @@ async def delete_video_to_trash(video_id: int, db: Session = Depends(get_db)):
     except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"数据库记录删除失败: {str(e)}")
     return {"message": f"视频 '{video_name}' 已发送到回收站并从数据库移除。"}
 
-@router.post("/scan-library")
-async def scan_library_api(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    def scan_in_background_with_new_session():
-        # 注意：这里不能直接使用外层函数的 db session，因为 background_tasks 在不同线程/上下文
-        # 每次后台任务都应该获取自己的 session
-        db_bg = next(get_db()) # 获取新的 session
-        try:
-            # 从 settings 获取最新的 video_paths 和 thumbnails_storage_path
-            current_video_paths = settings.video_paths 
-            current_thumbnails_path = settings.thumbnails_storage_path
+@router.post("/library/sync-and-clean", status_code=200)
+async def sync_library_paths_and_clean(
+    path_sync_request: PathSyncRequest,
+    background_tasks: BackgroundTasks, 
+):
+    """
+    Endpoint to be called when library paths are saved in settings.
+    It will clean orphaned videos based on the provided current_paths.
+    Log messages will be in English.
+    """
+    current_configured_paths = path_sync_request.current_paths
+    
+    print(f"[API /library/sync-and-clean] Received request to sync paths. Current paths: {current_configured_paths}")
 
-            print(f"[API scan-library] 后台任务开始扫描。路径: {current_video_paths}, 缩略图目录: {current_thumbnails_path}")
-            video_scanner.scan_video_folders_and_save(
-                db_bg, 
-                video_paths_to_scan=current_video_paths,
-                current_thumbnails_storage_path=current_thumbnails_path,
-                process_existing_missing_metadata=True 
+    def cleanup_task_with_new_session():
+        db_bg = next(get_db())
+        try:
+            # current_thumbnails_path 应该从 settings 获取最新的，因为这个任务是后台的
+            # 但由于这个API是前端保存设置时调用的，此时 settings 可能还未被后端完全重新加载（如果后端不重启）
+            # 因此，更安全的做法是，如果前端能传递 thumbnails_storage_path，或者后端能可靠地获取它
+            # 为了简单，我们假设 settings.thumbnails_storage_path 在后端是当前最新的
+            # 或者，让 library_cleaner.clean_orphaned_videos 从 settings 内部获取
+            
+            # 我们让 library_cleaner 从 settings 读取 thumbnails_storage_path
+            # 但这里为了演示，我们还是从 settings 实例获取
+            thumb_path = settings.thumbnails_storage_path 
+            
+            print(f"[API /library/sync-and-clean BG Task] Starting cleanup. Thumbnails at: {thumb_path}")
+            result = library_cleaner.clean_orphaned_videos(
+                db_bg,
+                current_configured_paths,
+                thumb_path 
             )
-            # 扫描完成后，可以更新“上次扫描时间”
-            # 例如，保存到 electron-store (通过主进程IPC) 或一个简单的配置文件/数据库记录
-            # store_last_scan_time(datetime.now()) # 假设有这样的函数
+            print(f"[API /library/sync-and-clean BG Task] {result.get('message')}")
         except Exception as e:
-            print(f"[API scan-library] 后台扫描任务发生错误: {e}")
+            print(f"[API /library/sync-and-clean BG Task] Error during background cleanup: {e}")
             traceback.print_exc()
         finally:
-            db_bg.close() # 关闭后台任务的 session
+            db_bg.close()
 
+    background_tasks.add_task(cleanup_task_with_new_session)
+    return {"message": "Library path synchronization and cleanup task started in background."}
+
+@router.post("/scan-library")
+async def scan_library_api(
+    background_tasks: BackgroundTasks, 
+    scan_request: Optional[ScanRequest] = None, # 修改这里，使其能接收 ScanRequest
+):
+    def scan_in_background_with_new_session():
+        db_bg = next(get_db())
+        try:
+            paths_for_this_scan = []
+            # 优先使用从请求体传递过来的路径
+            if scan_request and scan_request.paths_to_scan is not None: 
+                paths_for_this_scan = scan_request.paths_to_scan
+                print(f"[API /scan-library BG Task] Using paths from request body: {paths_for_this_scan}")
+            else:
+                # 如果前端没有传递路径，则回退到从 settings 对象获取
+                paths_for_this_scan = settings.video_paths 
+                print(f"[API /scan-library BG Task] Using paths from settings (fallback, as request body did not provide paths): {paths_for_this_scan}")
+
+            current_thumbnails_path_from_settings = settings.thumbnails_storage_path
+
+            print(f"[API /scan-library BG Task] Starting pre-scan cleanup. Paths for cleanup: {paths_for_this_scan}, Thumbnails: {current_thumbnails_path_from_settings}")
+            cleanup_result = library_cleaner.clean_orphaned_videos(
+                db_bg,
+                paths_for_this_scan, # 使用确定的路径列表进行清理
+                current_thumbnails_path_from_settings
+            )
+            print(f"[API /scan-library BG Task] Pre-scan cleanup result: {cleanup_result.get('message')}")
+
+            print(f"[API /scan-library BG Task] Proceeding with library scan for paths: {paths_for_this_scan}")
+            scan_result = video_scanner.scan_video_folders_and_save(
+                db_bg, 
+                video_paths_to_scan=paths_for_this_scan, # 使用确定的路径列表进行扫描
+                current_thumbnails_storage_path=current_thumbnails_path_from_settings,
+                process_existing_missing_metadata=True 
+            )
+            print(f"[API /scan-library BG Task] Scan result: {scan_result.get('message')}")
+            
+            library_cleaner.cleanup_unreferenced_thumbnail_files(db_bg, current_thumbnails_path_from_settings)
+            print(f"[API /scan-library BG Task] Final cleanup of unreferenced thumbnail files performed.")
+
+        except Exception as e:
+            print(f"[API /scan-library BG Task] Error during background scan: {e}")
+            traceback.print_exc()
+        finally:
+            db_bg.close()
+    
     background_tasks.add_task(scan_in_background_with_new_session)
-    return {"message": "视频库扫描任务已在后台启动。"}
+    return {"message": "Video library cleanup and scan task started in background."}
 
 @router.get("/stream/{video_id}")
 async def stream_video(video_id: int, request: Request, db: Session = Depends(get_db)):
@@ -453,3 +536,4 @@ async def get_library_stats(db: Session = Depends(get_db)):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取媒体库统计信息失败: {str(e)}")
+    

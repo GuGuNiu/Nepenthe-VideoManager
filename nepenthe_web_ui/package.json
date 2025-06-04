@@ -32,6 +32,7 @@
   "build": {
     "appId": "com.nepenthe.videomanager.desktop",
     "productName": "忘忧露",
+    "artifactName": "${productName}-v${version}.exe",
     "asar": true,
     "directories": {
       "output": "dist_electron",

@@ -13,11 +13,6 @@
 </p>
 
 ---
-<div align="center">
-  
-# **本项目是我个人研究学习,严禁用于任何商业用途**
-
-</div>
 
 ## 🌟 项目说明
 
@@ -46,6 +41,18 @@
 *   **包管理器**: [npm](https://www.npmjs.com/) / [pnpm](https://pnpm.io/) (根据你的选择)
 
 ---
+
+<p align="center">
+  <img src="https://s2.loli.net/2025/06/04/TBVd9svAcMi6zU3.png" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://s2.loli.net/2025/06/04/AZQYDHbFWBCL2Je.png" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://s2.loli.net/2025/06/04/bolatJqxT7n5UkB.png" width="100%">
+</p>
 
 ## 🚀 快速开始
 
@@ -108,7 +115,7 @@ FFmpeg/FFprobe 路径: 如果 FFmpeg/FFprobe 没有在系统 PATH 中，需要�
 
 视频库路径: 通过启动直接在后端配置中设置你要扫描的视频文件夹路径。
 
-## 📝 TODO / 未来计划
+## 📝 未来计划
 更完善的播放列表功能
 
 智能推荐或“猜你喜欢”
